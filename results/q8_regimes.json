@@ -1,0 +1,880 @@
+{
+  "baseline_label": "2023-06",
+  "regime_labels": [
+    "2023-07",
+    "2026-07"
+  ],
+  "baseline_summary": {
+    "period": "2023-06",
+    "n_success": 121,
+    "n_skipped": 86,
+    "n_failed": 0,
+    "flip_law": {
+      "slope": 0.1113572396576871,
+      "intercept": -0.2546561469374345,
+      "stderr": 0.017078888524113805,
+      "r2": 0.2632153954229477,
+      "n": 121
+    },
+    "flip_law_mismatch_warning": null,
+    "gamma_law": {
+      "slope": -0.011151150493679386,
+      "intercept": 0.40926601758629866,
+      "stderr": 0.05474654359971307,
+      "r2": 0.000348519911603562,
+      "n": 121
+    },
+    "gamma_law_mismatch_warning": null,
+    "gamma_median": 0.3270483536517638,
+    "gamma_iqr": 0.09854474872125507,
+    "p_flip_median": 0.4542849948519205,
+    "n_anti_persistent": 20,
+    "alpha_law": {
+      "slope": 0.028568390705064922,
+      "intercept": 0.48031620864600855,
+      "stderr": 0.10944993881719417,
+      "r2": 0.0017438851491380358,
+      "n": 41
+    },
+    "alpha_law_mismatch_warning": null,
+    "alpha_median": 0.7070061300207036,
+    "alpha_iqr": 0.2239876789907158
+  },
+  "regime_summaries": {
+    "2023-07": {
+      "period": "2023-07",
+      "n_success": 117,
+      "n_skipped": 87,
+      "n_failed": 3,
+      "flip_law": {
+        "slope": 0.09200835562286483,
+        "intercept": -0.13142892794400696,
+        "stderr": 0.015575956406524774,
+        "r2": 0.2327888428844893,
+        "n": 117
+      },
+      "flip_law_mismatch_warning": null,
+      "gamma_law": {
+        "slope": -0.022472357690994416,
+        "intercept": 0.463654832907239,
+        "stderr": 0.02251796117467158,
+        "r2": 0.008586107188236713,
+        "n": 117
+      },
+      "gamma_law_mismatch_warning": null,
+      "gamma_median": 0.3220624875455565,
+      "gamma_iqr": 0.06110536860325788,
+      "p_flip_median": 0.44831986417819375,
+      "n_anti_persistent": 15,
+      "alpha_law": {
+        "slope": 0.0437700282810396,
+        "intercept": 0.3639813085784523,
+        "stderr": 0.09305983809159268,
+        "r2": 0.005640374549609306,
+        "n": 41
+      },
+      "alpha_law_mismatch_warning": null,
+      "alpha_median": 0.6925259518612112,
+      "alpha_iqr": 0.2505054718913735
+    },
+    "2026-07": {
+      "period": "2026-07",
+      "n_success": 46,
+      "n_skipped": 93,
+      "n_failed": 68,
+      "flip_law": {
+        "slope": 0.023034273104126136,
+        "intercept": 0.26771155938218694,
+        "stderr": 0.032497904106311155,
+        "r2": 0.011288988028214542,
+        "n": 46
+      },
+      "flip_law_mismatch_warning": null,
+      "gamma_law": {
+        "slope": 0.16833330967501162,
+        "intercept": -0.8614110082821985,
+        "stderr": 0.04465298500910756,
+        "r2": 0.24413527437173332,
+        "n": 46
+      },
+      "gamma_law_mismatch_warning": null,
+      "gamma_median": 0.19908656208532355,
+      "gamma_iqr": 0.15097879090204072,
+      "p_flip_median": 0.4154485283314325,
+      "n_anti_persistent": 4,
+      "alpha_law": {
+        "slope": -0.0012231269574257428,
+        "intercept": 0.5158822462095278,
+        "stderr": 0.09126917104403016,
+        "r2": 5.986472741192905e-06,
+        "n": 32
+      },
+      "alpha_law_mismatch_warning": null,
+      "alpha_median": 0.5766328194307156,
+      "alpha_iqr": 0.4158555005008728
+    }
+  },
+  "survivorship": {
+    "2023-07": {
+      "n_baseline": 121,
+      "n_regime": 117,
+      "n_survivors": 101,
+      "survivors": [
+        "1000LUNCUSDT",
+        "1000PEPEUSDT",
+        "1000SHIBUSDT",
+        "1000XECUSDT",
+        "AAVEUSDT",
+        "ADAUSDT",
+        "AGIXUSDT",
+        "ALPHAUSDT",
+        "ANKRUSDT",
+        "ANTUSDT",
+        "APEUSDT",
+        "APTUSDT",
+        "ARBUSDT",
+        "ARPAUSDT",
+        "ATOMUSDT",
+        "AVAXUSDT",
+        "AXSUSDT",
+        "BANDUSDT",
+        "BCHUSDT",
+        "BELUSDT",
+        "BLURUSDT",
+        "BNBUSDT",
+        "BTCBUSD",
+        "BTCUSDT",
+        "CFXUSDT",
+        "CHZUSDT",
+        "COMPUSDT",
+        "CRVUSDT",
+        "CTSIUSDT",
+        "DOGEUSDT",
+        "DOTUSDT",
+        "DUSKUSDT",
+        "DYDXUSDT",
+        "EDUUSDT",
+        "EOSUSDT",
+        "ETCUSDT",
+        "ETHBUSD",
+        "ETHUSDT",
+        "FETUSDT",
+        "FILUSDT",
+        "FTMUSDT",
+        "FXSUSDT",
+        "GALAUSDT",
+        "GMTUSDT",
+        "GRTUSDT",
+        "HBARUSDT",
+        "ICPUSDT",
+        "IDUSDT",
+        "IMXUSDT",
+        "INJUSDT",
+        "JASMYUSDT",
+        "KAVAUSDT",
+        "KEYUSDT",
+        "KNCUSDT",
+        "LDOUSDT",
+        "LINAUSDT",
+        "LINKUSDT",
+        "LQTYUSDT",
+        "LTCUSDT",
+        "LUNA2USDT",
+        "MAGICUSDT",
+        "MANAUSDT",
+        "MASKUSDT",
+        "MATICUSDT",
+        "MINAUSDT",
+        "MKRUSDT",
+        "MTLUSDT",
+        "NEARUSDT",
+        "NEOUSDT",
+        "NKNUSDT",
+        "OCEANUSDT",
+        "OMGUSDT",
+        "OPUSDT",
+        "PHBUSDT",
+        "RDNTUSDT",
+        "RENUSDT",
+        "RLCUSDT",
+        "RNDRUSDT",
+        "ROSEUSDT",
+        "SANDUSDT",
+        "SNXUSDT",
+        "SOLBUSD",
+        "SOLUSDT",
+        "STGUSDT",
+        "STORJUSDT",
+        "STXUSDT",
+        "SUIUSDT",
+        "SUSHIUSDT",
+        "SXPUSDT",
+        "THETAUSDT",
+        "TOMOUSDT",
+        "TRXUSDT",
+        "UNIUSDT",
+        "WAVESUSDT",
+        "WOOUSDT",
+        "XLMUSDT",
+        "XMRUSDT",
+        "XRPBUSD",
+        "XRPUSDT",
+        "YFIUSDT",
+        "ZENUSDT"
+      ],
+      "non_survivors": [
+        {
+          "symbol": "1000FLOKIUSDT",
+          "reason": "skipped below min_events (n_events=747701)"
+        },
+        {
+          "symbol": "ACHUSDT",
+          "reason": "skipped below min_events (n_events=748120)"
+        },
+        {
+          "symbol": "AMBUSDT",
+          "reason": "skipped below min_events (n_events=556865)"
+        },
+        {
+          "symbol": "BNXUSDT",
+          "reason": "skipped below min_events (n_events=653211)"
+        },
+        {
+          "symbol": "COMBOUSDT",
+          "reason": "skipped below min_events (n_events=880918)"
+        },
+        {
+          "symbol": "COTIUSDT",
+          "reason": "skipped below min_events (n_events=962970)"
+        },
+        {
+          "symbol": "DASHUSDT",
+          "reason": "skipped below min_events (n_events=823758)"
+        },
+        {
+          "symbol": "FLMUSDT",
+          "reason": "skipped below min_events (n_events=684050)"
+        },
+        {
+          "symbol": "GALABUSD",
+          "reason": "skipped below min_events (n_events=713883)"
+        },
+        {
+          "symbol": "GALUSDT",
+          "reason": "skipped below min_events (n_events=936924)"
+        },
+        {
+          "symbol": "HIGHUSDT",
+          "reason": "skipped below min_events (n_events=619327)"
+        },
+        {
+          "symbol": "JOEUSDT",
+          "reason": "skipped below min_events (n_events=877303)"
+        },
+        {
+          "symbol": "LDOBUSD",
+          "reason": "skipped below min_events (n_events=752586)"
+        },
+        {
+          "symbol": "LPTUSDT",
+          "reason": "skipped below min_events (n_events=782640)"
+        },
+        {
+          "symbol": "QNTUSDT",
+          "reason": "skipped below min_events (n_events=941058)"
+        },
+        {
+          "symbol": "RADUSDT",
+          "reason": "skipped below min_events (n_events=497135)"
+        },
+        {
+          "symbol": "SFPUSDT",
+          "reason": "skipped below min_events (n_events=831726)"
+        },
+        {
+          "symbol": "TRUUSDT",
+          "reason": "skipped below min_events (n_events=737950)"
+        },
+        {
+          "symbol": "TUSDT",
+          "reason": "skipped below min_events (n_events=959631)"
+        },
+        {
+          "symbol": "VETUSDT",
+          "reason": "skipped below min_events (n_events=796364)"
+        }
+      ]
+    },
+    "2026-07": {
+      "n_baseline": 121,
+      "n_regime": 46,
+      "n_survivors": 40,
+      "survivors": [
+        "1000PEPEUSDT",
+        "1000SHIBUSDT",
+        "1000XECUSDT",
+        "AAVEUSDT",
+        "ADAUSDT",
+        "APTUSDT",
+        "ARBUSDT",
+        "ARPAUSDT",
+        "AVAXUSDT",
+        "BCHUSDT",
+        "BELUSDT",
+        "BLURUSDT",
+        "BNBUSDT",
+        "BTCUSDT",
+        "COTIUSDT",
+        "DASHUSDT",
+        "DOGEUSDT",
+        "DOTUSDT",
+        "DYDXUSDT",
+        "ETCUSDT",
+        "ETHUSDT",
+        "FETUSDT",
+        "FILUSDT",
+        "HBARUSDT",
+        "IDUSDT",
+        "INJUSDT",
+        "LDOUSDT",
+        "LINKUSDT",
+        "LTCUSDT",
+        "NEARUSDT",
+        "OPUSDT",
+        "SOLUSDT",
+        "SUIUSDT",
+        "TRXUSDT",
+        "TUSDT",
+        "UNIUSDT",
+        "XLMUSDT",
+        "XMRUSDT",
+        "XRPUSDT",
+        "YFIUSDT"
+      ],
+      "non_survivors": [
+        {
+          "symbol": "1000FLOKIUSDT",
+          "reason": "skipped below min_events (n_events=589155)"
+        },
+        {
+          "symbol": "1000LUNCUSDT",
+          "reason": "skipped below min_events (n_events=919921)"
+        },
+        {
+          "symbol": "ACHUSDT",
+          "reason": "skipped below min_events (n_events=920286)"
+        },
+        {
+          "symbol": "AGIXUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/AGIXUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "ALPHAUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/ALPHAUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "AMBUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/AMBUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "ANKRUSDT",
+          "reason": "skipped below min_events (n_events=533868)"
+        },
+        {
+          "symbol": "ANTUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/ANTUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "APEUSDT",
+          "reason": "skipped below min_events (n_events=667991)"
+        },
+        {
+          "symbol": "ATOMUSDT",
+          "reason": "skipped below min_events (n_events=837588)"
+        },
+        {
+          "symbol": "AXSUSDT",
+          "reason": "skipped below min_events (n_events=487196)"
+        },
+        {
+          "symbol": "BANDUSDT",
+          "reason": "skipped below min_events (n_events=258105)"
+        },
+        {
+          "symbol": "BNXUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/BNXUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "BTCBUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/BTCBUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "CFXUSDT",
+          "reason": "skipped below min_events (n_events=642676)"
+        },
+        {
+          "symbol": "CHZUSDT",
+          "reason": "skipped below min_events (n_events=763155)"
+        },
+        {
+          "symbol": "COMBOUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/COMBOUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "COMPUSDT",
+          "reason": "skipped below min_events (n_events=252556)"
+        },
+        {
+          "symbol": "CRVUSDT",
+          "reason": "skipped below min_events (n_events=718109)"
+        },
+        {
+          "symbol": "CTSIUSDT",
+          "reason": "skipped below min_events (n_events=286784)"
+        },
+        {
+          "symbol": "DUSKUSDT",
+          "reason": "skipped below min_events (n_events=457845)"
+        },
+        {
+          "symbol": "EDUUSDT",
+          "reason": "skipped below min_events (n_events=438257)"
+        },
+        {
+          "symbol": "EOSUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/EOSUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "ETHBUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/ETHBUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "FLMUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/FLMUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "FTMUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/FTMUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "FXSUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/FXSUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "GALABUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/GALABUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "GALAUSDT",
+          "reason": "skipped below min_events (n_events=849002)"
+        },
+        {
+          "symbol": "GALUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/GALUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "GMTUSDT",
+          "reason": "skipped below min_events (n_events=360680)"
+        },
+        {
+          "symbol": "GRTUSDT",
+          "reason": "skipped below min_events (n_events=293204)"
+        },
+        {
+          "symbol": "HIGHUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/HIGHUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "ICPUSDT",
+          "reason": "skipped below min_events (n_events=994228)"
+        },
+        {
+          "symbol": "IMXUSDT",
+          "reason": "skipped below min_events (n_events=345265)"
+        },
+        {
+          "symbol": "JASMYUSDT",
+          "reason": "skipped below min_events (n_events=546964)"
+        },
+        {
+          "symbol": "JOEUSDT",
+          "reason": "skipped below min_events (n_events=261908)"
+        },
+        {
+          "symbol": "KAVAUSDT",
+          "reason": "skipped below min_events (n_events=271865)"
+        },
+        {
+          "symbol": "KEYUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/KEYUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "KNCUSDT",
+          "reason": "skipped below min_events (n_events=175561)"
+        },
+        {
+          "symbol": "LDOBUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/LDOBUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "LINAUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/LINAUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "LPTUSDT",
+          "reason": "skipped below min_events (n_events=410648)"
+        },
+        {
+          "symbol": "LQTYUSDT",
+          "reason": "skipped below min_events (n_events=301348)"
+        },
+        {
+          "symbol": "LUNA2USDT",
+          "reason": "skipped below min_events (n_events=369214)"
+        },
+        {
+          "symbol": "MAGICUSDT",
+          "reason": "skipped below min_events (n_events=406652)"
+        },
+        {
+          "symbol": "MANAUSDT",
+          "reason": "skipped below min_events (n_events=719991)"
+        },
+        {
+          "symbol": "MASKUSDT",
+          "reason": "skipped below min_events (n_events=360294)"
+        },
+        {
+          "symbol": "MATICUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/MATICUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "MINAUSDT",
+          "reason": "skipped below min_events (n_events=489846)"
+        },
+        {
+          "symbol": "MKRUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/MKRUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "MTLUSDT",
+          "reason": "skipped below min_events (n_events=178253)"
+        },
+        {
+          "symbol": "NEOUSDT",
+          "reason": "skipped below min_events (n_events=342698)"
+        },
+        {
+          "symbol": "NKNUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/NKNUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "OCEANUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/OCEANUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "OMGUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/OMGUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "PHBUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/PHBUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "QNTUSDT",
+          "reason": "skipped below min_events (n_events=400838)"
+        },
+        {
+          "symbol": "RADUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/RADUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "RDNTUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/RDNTUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "RENUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/RENUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "RLCUSDT",
+          "reason": "skipped below min_events (n_events=358385)"
+        },
+        {
+          "symbol": "RNDRUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/RNDRUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "ROSEUSDT",
+          "reason": "skipped below min_events (n_events=531017)"
+        },
+        {
+          "symbol": "SANDUSDT",
+          "reason": "skipped below min_events (n_events=727999)"
+        },
+        {
+          "symbol": "SFPUSDT",
+          "reason": "skipped below min_events (n_events=231105)"
+        },
+        {
+          "symbol": "SNXUSDT",
+          "reason": "skipped below min_events (n_events=602240)"
+        },
+        {
+          "symbol": "SOLBUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/SOLBUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "STGUSDT",
+          "reason": "skipped below min_events (n_events=830723)"
+        },
+        {
+          "symbol": "STORJUSDT",
+          "reason": "skipped below min_events (n_events=697656)"
+        },
+        {
+          "symbol": "STXUSDT",
+          "reason": "skipped below min_events (n_events=756215)"
+        },
+        {
+          "symbol": "SUSHIUSDT",
+          "reason": "skipped below min_events (n_events=281617)"
+        },
+        {
+          "symbol": "SXPUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/SXPUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "THETAUSDT",
+          "reason": "skipped below min_events (n_events=423345)"
+        },
+        {
+          "symbol": "TOMOUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/TOMOUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "TRUUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/TRUUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "VETUSDT",
+          "reason": "skipped below min_events (n_events=497001)"
+        },
+        {
+          "symbol": "WAVESUSDT",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/WAVESUSDT/2026-07.parquet)"
+        },
+        {
+          "symbol": "WOOUSDT",
+          "reason": "skipped below min_events (n_events=246613)"
+        },
+        {
+          "symbol": "XRPBUSD",
+          "reason": "failed/missing (parquet not found: data/parquet/aggTrades/XRPBUSD/2026-07.parquet)"
+        },
+        {
+          "symbol": "ZENUSDT",
+          "reason": "skipped below min_events (n_events=587443)"
+        }
+      ]
+    }
+  },
+  "universe_accounting": {
+    "2023-07": {
+      "n_requested": 207,
+      "n_successful": 117,
+      "n_skipped_below_floor": 87,
+      "n_failed_no_data": 3,
+      "reconciles": true,
+      "download_missing_cross_check": null
+    },
+    "2026-07": {
+      "n_requested": 207,
+      "n_successful": 46,
+      "n_skipped_below_floor": 93,
+      "n_failed_no_data": 68,
+      "reconciles": true,
+      "download_missing_cross_check": "matches: 68 symbols in both the q4 `failures` list and the external download-missing file"
+    }
+  },
+  "rank_correlations": {
+    "2023-07": {
+      "n_overlap": 101,
+      "symbols": [
+        "1000LUNCUSDT",
+        "1000PEPEUSDT",
+        "1000SHIBUSDT",
+        "1000XECUSDT",
+        "AAVEUSDT",
+        "ADAUSDT",
+        "AGIXUSDT",
+        "ALPHAUSDT",
+        "ANKRUSDT",
+        "ANTUSDT",
+        "APEUSDT",
+        "APTUSDT",
+        "ARBUSDT",
+        "ARPAUSDT",
+        "ATOMUSDT",
+        "AVAXUSDT",
+        "AXSUSDT",
+        "BANDUSDT",
+        "BCHUSDT",
+        "BELUSDT",
+        "BLURUSDT",
+        "BNBUSDT",
+        "BTCBUSD",
+        "BTCUSDT",
+        "CFXUSDT",
+        "CHZUSDT",
+        "COMPUSDT",
+        "CRVUSDT",
+        "CTSIUSDT",
+        "DOGEUSDT",
+        "DOTUSDT",
+        "DUSKUSDT",
+        "DYDXUSDT",
+        "EDUUSDT",
+        "EOSUSDT",
+        "ETCUSDT",
+        "ETHBUSD",
+        "ETHUSDT",
+        "FETUSDT",
+        "FILUSDT",
+        "FTMUSDT",
+        "FXSUSDT",
+        "GALAUSDT",
+        "GMTUSDT",
+        "GRTUSDT",
+        "HBARUSDT",
+        "ICPUSDT",
+        "IDUSDT",
+        "IMXUSDT",
+        "INJUSDT",
+        "JASMYUSDT",
+        "KAVAUSDT",
+        "KEYUSDT",
+        "KNCUSDT",
+        "LDOUSDT",
+        "LINAUSDT",
+        "LINKUSDT",
+        "LQTYUSDT",
+        "LTCUSDT",
+        "LUNA2USDT",
+        "MAGICUSDT",
+        "MANAUSDT",
+        "MASKUSDT",
+        "MATICUSDT",
+        "MINAUSDT",
+        "MKRUSDT",
+        "MTLUSDT",
+        "NEARUSDT",
+        "NEOUSDT",
+        "NKNUSDT",
+        "OCEANUSDT",
+        "OMGUSDT",
+        "OPUSDT",
+        "PHBUSDT",
+        "RDNTUSDT",
+        "RENUSDT",
+        "RLCUSDT",
+        "RNDRUSDT",
+        "ROSEUSDT",
+        "SANDUSDT",
+        "SNXUSDT",
+        "SOLBUSD",
+        "SOLUSDT",
+        "STGUSDT",
+        "STORJUSDT",
+        "STXUSDT",
+        "SUIUSDT",
+        "SUSHIUSDT",
+        "SXPUSDT",
+        "THETAUSDT",
+        "TOMOUSDT",
+        "TRXUSDT",
+        "UNIUSDT",
+        "WAVESUSDT",
+        "WOOUSDT",
+        "XLMUSDT",
+        "XMRUSDT",
+        "XRPBUSD",
+        "XRPUSDT",
+        "YFIUSDT",
+        "ZENUSDT"
+      ],
+      "p_flip_spearman": 0.7576470588235293,
+      "gamma_spearman": 0.17588817705299942,
+      "alpha_n_overlap": 41,
+      "alpha_spearman": 0.8722996515679445
+    },
+    "2026-07": {
+      "n_overlap": 40,
+      "symbols": [
+        "1000PEPEUSDT",
+        "1000SHIBUSDT",
+        "1000XECUSDT",
+        "AAVEUSDT",
+        "ADAUSDT",
+        "APTUSDT",
+        "ARBUSDT",
+        "ARPAUSDT",
+        "AVAXUSDT",
+        "BCHUSDT",
+        "BELUSDT",
+        "BLURUSDT",
+        "BNBUSDT",
+        "BTCUSDT",
+        "COTIUSDT",
+        "DASHUSDT",
+        "DOGEUSDT",
+        "DOTUSDT",
+        "DYDXUSDT",
+        "ETCUSDT",
+        "ETHUSDT",
+        "FETUSDT",
+        "FILUSDT",
+        "HBARUSDT",
+        "IDUSDT",
+        "INJUSDT",
+        "LDOUSDT",
+        "LINKUSDT",
+        "LTCUSDT",
+        "NEARUSDT",
+        "OPUSDT",
+        "SOLUSDT",
+        "SUIUSDT",
+        "TRXUSDT",
+        "TUSDT",
+        "UNIUSDT",
+        "XLMUSDT",
+        "XMRUSDT",
+        "XRPUSDT",
+        "YFIUSDT"
+      ],
+      "p_flip_spearman": 0.2924953095684803,
+      "gamma_spearman": 0.053846153846153856,
+      "alpha_n_overlap": 32,
+      "alpha_spearman": 0.21444281524926684
+    }
+  },
+  "law_stability": {
+    "flip_law_same_sign_all_regimes": true,
+    "flip_law_slope_by_label": {
+      "__baseline__": 0.1113572396576871,
+      "2023-07": 0.09200835562286483,
+      "2026-07": 0.023034273104126136
+    },
+    "flip_law_slope_ratio_vs_baseline": {
+      "2023-07": 0.8262449384135161,
+      "2026-07": 0.20685025216980635
+    },
+    "gamma_invariant_all_regimes": false,
+    "gamma_r2_by_label": {
+      "__baseline__": 0.000348519911603562,
+      "2023-07": 0.008586107188236713,
+      "2026-07": 0.24413527437173332
+    },
+    "gamma_flat_r2_threshold": 0.05
+  }
+}

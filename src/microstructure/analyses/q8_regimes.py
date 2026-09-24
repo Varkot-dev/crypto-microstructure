@@ -160,7 +160,7 @@ def _reg_mismatch(recomputed: dict | None, stored: dict | None) -> str | None:
         )
     diffs = {
         k: abs(recomputed[k] - stored[k])
-        for k in ("slope", "intercept", "r2")
+        for k in ("slope", "intercept", "r2", "n")
         if k in stored
     }
     bad = {k: v for k, v in diffs.items() if v > REGRESSION_MISMATCH_TOL}
@@ -248,6 +248,69 @@ def _skip_fail_reason(q4: dict, symbol: str) -> str:
         if f["symbol"] == symbol:
             return f"failed/missing ({f.get('reason', 'no reason recorded')})"
     return "absent from regime universe (no skip/failure record found)"
+
+
+def _universe_accounting(
+    regime_q4: dict, download_missing_symbols: set[str] | None
+) -> dict:
+    """Three-bucket breakdown of the regime's requested universe.
+
+    Buckets: successful (passes min_events and was analyzed), skipped
+    (downloaded but below the min_events floor), failed (not downloaded /
+    parquet missing). These are read directly from the regime's own q4
+    json (`n_symbols_successful` / `n_symbols_skipped` / `n_symbols_failed`
+    and the `failures` list), which always sum to `n_symbols_requested` by
+    construction of the upstream Q4 run.
+
+    When `download_missing_symbols` is given (an optional external list of
+    symbols known to have no downloadable data for this period, e.g. a
+    `nonsurvivors_*_download.txt` file), it is cross-checked against the
+    regime's own `failures` symbol set and any mismatch is surfaced as a
+    warning rather than silently trusted or ignored — consistent with this
+    module's "recompute, don't trust blindly" approach elsewhere.
+    """
+    n_requested = regime_q4.get("n_symbols_requested")
+    n_successful = regime_q4.get("n_symbols_successful")
+    n_skipped = regime_q4.get("n_symbols_skipped")
+    n_failed = regime_q4.get("n_symbols_failed")
+    reconciles = (
+        n_requested is not None
+        and n_successful is not None
+        and n_skipped is not None
+        and n_failed is not None
+        and n_successful + n_skipped + n_failed == n_requested
+    )
+
+    accounting = {
+        "n_requested": n_requested,
+        "n_successful": n_successful,
+        "n_skipped_below_floor": n_skipped,
+        "n_failed_no_data": n_failed,
+        "reconciles": reconciles,
+        "download_missing_cross_check": None,
+    }
+
+    if download_missing_symbols is not None:
+        failure_symbols = {f["symbol"] for f in regime_q4.get("failures", [])}
+        if failure_symbols == download_missing_symbols:
+            accounting["download_missing_cross_check"] = (
+                f"matches: {len(failure_symbols)} symbols in both the q4 `failures` list "
+                "and the external download-missing file"
+            )
+        else:
+            only_in_json = sorted(failure_symbols - download_missing_symbols)
+            only_in_file = sorted(download_missing_symbols - failure_symbols)
+            accounting["download_missing_cross_check"] = (
+                "MISMATCH between q4 `failures` "
+                f"({len(failure_symbols)} symbols) and the external download-missing file "
+                f"({len(download_missing_symbols)} symbols): "
+                f"{len(only_in_json)} only in failures ({', '.join(only_in_json[:10])}"
+                f"{'...' if len(only_in_json) > 10 else ''}), "
+                f"{len(only_in_file)} only in the download-missing file "
+                f"({', '.join(only_in_file[:10])}{'...' if len(only_in_file) > 10 else ''})"
+            )
+
+    return accounting
 
 
 def _survivorship(baseline_q4: dict, regime_q4: dict) -> dict:
@@ -510,6 +573,7 @@ def _write_md(
     baseline_summary: dict,
     regime_summaries: dict[str, dict],
     survivorship_by_label: dict[str, dict],
+    universe_accounting_by_label: dict[str, dict],
     rank_corr_by_label: dict[str, dict],
     law_stability: dict,
 ) -> None:
@@ -683,6 +747,32 @@ def _write_md(
                 lines.append(f"| {ns['symbol']} | {ns['reason']} |")
             lines.append("")
 
+    if universe_accounting_by_label:
+        lines.append("### Universe accounting (full requested universe, per regime)")
+        lines.append("")
+        lines.append(
+            "The survivorship table above is relative to the baseline's *successful* symbol "
+            "set. The table below instead accounts for the **full requested universe** in "
+            "each regime (fixed to the baseline's symbol list) across three buckets: "
+            "successful (passed `min_events`), skipped (downloaded but below `min_events`), "
+            "and failed (no data to download at all for that period). These three buckets "
+            "always sum to the requested universe size by construction of the upstream Q4 run."
+        )
+        lines.append("")
+        lines.append("| regime | requested | successful | skipped (below floor) | failed (no data) | reconciles |")
+        lines.append("|---|---|---|---|---|---|")
+        for label, ua in universe_accounting_by_label.items():
+            lines.append(
+                f"| {label} | {ua['n_requested']} | {ua['n_successful']} | "
+                f"{ua['n_skipped_below_floor']} | {ua['n_failed_no_data']} | "
+                f"{'yes' if ua['reconciles'] else 'NO — see json'} |"
+            )
+        lines.append("")
+        for label, ua in universe_accounting_by_label.items():
+            if ua["download_missing_cross_check"] is not None:
+                lines.append(f"- **{label}** download-missing cross-check: {ua['download_missing_cross_check']}")
+        lines.append("")
+
     lines.append("## Symbol-level rank correlation")
     lines.append("")
     lines.append("| regime | n overlap | p_flip Spearman ρ | γ Spearman ρ | α overlap n | α Spearman ρ |")
@@ -736,11 +826,16 @@ def _write_md(
 # ---------------------------------------------------------------------------
 
 
+def _load_download_missing(path: Path) -> set[str]:
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
 def run_q8(
     out_dir: Path,
     baseline_dir: Path,
     regime_dirs: dict[str, Path],
     baseline_label: str = "2023-06",
+    download_missing_paths: dict[str, Path] | None = None,
 ) -> dict:
     """Compare the Q4/Q6 cross-sectional laws between a baseline period and one or more regimes.
 
@@ -748,11 +843,20 @@ def run_q8(
     directory holding that regime's q4_cross_section.json (+ optional
     q6_endogeneity.json). Reads only those two json files per directory —
     never touches `data/` or any raw parquet.
+
+    `download_missing_paths` is an optional map of the same labels to a
+    plain-text file (one symbol per line) listing symbols for which no raw
+    data could be downloaded for that regime's period at all (as opposed to
+    symbols that were downloaded but fell below the `min_events` floor).
+    This is purely a cross-check against the regime's own q4 `failures`
+    list — the universe accounting itself is always computed from the q4
+    json regardless of whether this is provided.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     baseline = _load_regime(baseline_dir)
     regimes = {label: _load_regime(path) for label, path in regime_dirs.items()}
+    download_missing_paths = download_missing_paths or {}
 
     baseline_summary = _regime_summary(baseline["q4"], baseline["q6"])
     regime_summaries = {
@@ -761,6 +865,16 @@ def run_q8(
 
     survivorship_by_label = {
         label: _survivorship(baseline["q4"], r["q4"]) for label, r in regimes.items()
+    }
+
+    universe_accounting_by_label = {
+        label: _universe_accounting(
+            r["q4"],
+            _load_download_missing(download_missing_paths[label])
+            if label in download_missing_paths
+            else None,
+        )
+        for label, r in regimes.items()
     }
 
     rank_corr_by_label = {
@@ -776,6 +890,7 @@ def run_q8(
         "baseline_summary": baseline_summary,
         "regime_summaries": regime_summaries,
         "survivorship": survivorship_by_label,
+        "universe_accounting": universe_accounting_by_label,
         "rank_correlations": rank_corr_by_label,
         "law_stability": law_stability,
     }
@@ -787,6 +902,7 @@ def run_q8(
         baseline_summary,
         regime_summaries,
         survivorship_by_label,
+        universe_accounting_by_label,
         rank_corr_by_label,
         law_stability,
     )
@@ -806,17 +922,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="LABEL=DIR",
         help="a regime directory as LABEL=DIR; repeatable",
     )
+    parser.add_argument(
+        "--download-missing",
+        action="append",
+        default=[],
+        metavar="LABEL=FILE",
+        help=(
+            "optional cross-check file of symbols with no downloadable data for that "
+            "regime's period, as LABEL=FILE (one symbol per line); repeatable"
+        ),
+    )
     return parser.parse_args(argv)
 
 
-def _parse_regime_args(regime_args: list[str]) -> dict[str, Path]:
-    regime_dirs: dict[str, Path] = {}
-    for entry in regime_args:
+def _parse_label_path_args(entries: list[str], flag_name: str) -> dict[str, Path]:
+    parsed: dict[str, Path] = {}
+    for entry in entries:
         if "=" not in entry:
-            raise ValueError(f"--regime must be LABEL=DIR, got: {entry!r}")
-        label, _, dir_str = entry.partition("=")
-        regime_dirs[label] = Path(dir_str)
-    return regime_dirs
+            raise ValueError(f"{flag_name} must be LABEL=PATH, got: {entry!r}")
+        label, _, path_str = entry.partition("=")
+        parsed[label] = Path(path_str)
+    return parsed
 
 
 if __name__ == "__main__":
@@ -824,6 +950,7 @@ if __name__ == "__main__":
     run_q8(
         args.out,
         baseline_dir=args.baseline_dir,
-        regime_dirs=_parse_regime_args(args.regime),
+        regime_dirs=_parse_label_path_args(args.regime, "--regime"),
         baseline_label=args.baseline_label,
+        download_missing_paths=_parse_label_path_args(args.download_missing, "--download-missing"),
     )

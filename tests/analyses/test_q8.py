@@ -29,6 +29,7 @@ import pytest
 
 from microstructure.analyses.q8_regimes import (
     _average_ranks,
+    _reg_mismatch,
     run_q8,
     spearman_corr,
 )
@@ -384,6 +385,49 @@ def test_run_q8_recomputes_not_trusts_stored_regressions(tmp_path: Path):
     assert "disagrees" in regime_summary["flip_law_mismatch_warning"]
     # The recomputed slope (trustworthy) must NOT equal the corrupted stored one.
     assert regime_summary["flip_law"]["slope"] != pytest.approx(0.06 + 5.0, abs=0.5)
+
+
+def test_run_q8_same_sign_all_regimes_true_when_no_flip(tmp_path: Path):
+    """All regimes sharing the baseline's flip-slope sign -> same_sign must be True.
+
+    Guards against a hardcoded `False` in `_law_stability`: this fixture has
+    NO sign-flipped regime at all, so the only way this assertion passes is
+    if the sign comparison is actually performed.
+    """
+    baseline_dir = tmp_path / "baseline"
+    a_dir = tmp_path / "regime_a"
+    b_dir = tmp_path / "regime_b"
+
+    baseline_records = _baseline_records()
+    _write_q4_json(baseline_dir, "2023-06", baseline_records)
+
+    # Both regimes keep the same positive sign as baseline (+0.05).
+    a_records = _regime_records(flip_slope=0.06, flip_intercept=0.28, symbols=SYMBOLS)
+    _write_q4_json(a_dir, "2023-07", a_records)
+    b_records = _regime_records(flip_slope=0.04, flip_intercept=0.32, symbols=SYMBOLS)
+    _write_q4_json(b_dir, "2024-07", b_records)
+
+    out_dir = tmp_path / "results"
+    result = run_q8(
+        out_dir,
+        baseline_dir=baseline_dir,
+        regime_dirs={"2023-07": a_dir, "2024-07": b_dir},
+        baseline_label="2023-06",
+    )
+
+    stability = result["law_stability"]
+    assert stability["flip_law_same_sign_all_regimes"] is True
+    for label, slope in stability["flip_law_slope_by_label"].items():
+        assert slope > 0, f"{label} slope unexpectedly non-positive: {slope}"
+
+
+def test_reg_mismatch_flags_n_only_difference():
+    """`_reg_mismatch` must flag a mismatch when only `n` differs (slope/intercept/r2 equal)."""
+    stored = {"slope": 0.05, "intercept": 0.3, "stderr": 0.01, "r2": 0.5, "n": 10}
+    recomputed = {"slope": 0.05, "intercept": 0.3, "stderr": 0.01, "r2": 0.5, "n": 9}
+    warning = _reg_mismatch(recomputed, stored)
+    assert warning is not None
+    assert "n differs" in warning
 
 
 def test_run_q8_output_files_exist(three_regime_dirs: dict, tmp_path: Path):

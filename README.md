@@ -253,7 +253,7 @@ an assumption that cuts hardest against precisely the reactive schedule.
 ### 1. Environment
 
 ```bash
-git clone git@github.com:Varkot-dev/QR-Project.git
+git clone git@github.com:Varkot-dev/crypto-microstructure.git
 cd QR-Project
 uv sync
 ```

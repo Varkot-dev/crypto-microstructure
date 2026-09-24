@@ -253,7 +253,7 @@ an assumption that cuts hardest against precisely the reactive schedule.
 ### 1. Environment
 
 ```bash
-git clone git@github.com:Varkot-dev/QR-Project.git
+git clone git@github.com:Varkot-dev/crypto-microstructure.git
 cd QR-Project
 uv sync
 ```
@@ -503,3 +503,7 @@ distinguish a law from a June — which is also the first falsifier for the liqu
 pattern now visible in both γ̂ (Q4) and α̂ (Q6). Still queued from Phase 1: block-bootstrap
 intervals on γ̂ and the OFI slope, a Q3 bar-length sweep, and a signed-trade-volume comparison
 against book OFI — all using data already on disk.
+
+---
+
+**Results site:** <https://varkot-dev.github.io/crypto-microstructure/> — the three headline findings, interactive cross-section and kernel explorers, and how the numbers were verified.

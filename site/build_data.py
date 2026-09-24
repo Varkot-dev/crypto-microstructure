@@ -4,9 +4,10 @@ Stdlib only. Run from the repo root:
 
     python site/build_data.py
 
-Writes site/data/*.json. The page loads only those files, never results/
-directly, so the deployed site is a self-contained static bundle and the
-numbers on it are traceable to exactly one committed source artifact each.
+Writes site/data/*.json. The page loads only those files (plus the figures
+copied into site/assets/), never results/ directly, so the deployed site is a
+self-contained static bundle and the numbers on it are traceable to exactly one
+committed source artifact each.
 
 Every value written here is copied or arithmetically derived from
 results/*.json. Nothing is invented, rounded for presentation, or
@@ -226,12 +227,67 @@ def build_execution() -> None:
     )
 
 
+def build_regimes() -> None:
+    """Q8: the three-regime table, universe accounting, stability verdicts."""
+    src = read_result("q8_regimes.json")
+
+    summaries = {src["baseline_label"]: src["baseline_summary"]}
+    summaries.update(src["regime_summaries"])
+
+    stability = src["law_stability"]
+    accounting = src["universe_accounting"]
+    ranks = src["rank_correlations"]
+
+    def row(label: str) -> dict:
+        s = summaries[label]
+        acct = accounting.get(label)
+        rank = ranks.get(label)
+        return {
+            "label": label,
+            "is_baseline": label == src["baseline_label"],
+            "n_success": s["n_success"],
+            "flip_slope": s["flip_law"]["slope"],
+            "flip_stderr": s["flip_law"]["stderr"],
+            "flip_r2": s["flip_law"]["r2"],
+            "flip_slope_ratio": stability["flip_law_slope_ratio_vs_baseline"].get(label),
+            "gamma_slope": s["gamma_law"]["slope"],
+            "gamma_r2": s["gamma_law"]["r2"],
+            "gamma_median": s["gamma_median"],
+            "p_flip_median": s["p_flip_median"],
+            "n_anti_persistent": s["n_anti_persistent"],
+            "alpha_median": s["alpha_median"],
+            "alpha_n": s["alpha_law"]["n"],
+            "alpha_r2": s["alpha_law"]["r2"],
+            # None for the baseline: it is the frame of reference, not a regime
+            # measured against one, so it has no accounting or overlap row.
+            "requested": acct["n_requested"] if acct else None,
+            "n_below_floor": acct["n_skipped_below_floor"] if acct else None,
+            "n_no_data": acct["n_failed_no_data"] if acct else None,
+            "n_overlap": rank["n_overlap"] if rank else None,
+            "p_flip_spearman": rank["p_flip_spearman"] if rank else None,
+        }
+
+    labels = [src["baseline_label"], *src["regime_labels"]]
+    write_slice(
+        "regimes.json",
+        {
+            "baseline_label": src["baseline_label"],
+            "labels": labels,
+            "rows": [row(label) for label in labels],
+            "gamma_flat_r2_threshold": stability["gamma_flat_r2_threshold"],
+            "flip_same_sign_all_regimes": stability["flip_law_same_sign_all_regimes"],
+            "gamma_invariant_all_regimes": stability["gamma_invariant_all_regimes"],
+        },
+    )
+
+
 def main() -> None:
     print(f"Building site data from {RESULTS.relative_to(REPO_ROOT)}/ ...")
     panel_symbols = build_kernels()
     build_cross_section(panel_symbols)
     build_endogeneity()
     build_execution()
+    build_regimes()
     print("Done.")
 
 

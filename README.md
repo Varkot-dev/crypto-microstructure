@@ -6,7 +6,8 @@ response function, and order-flow-imbalance linearity — replicated on crypto a
 against the published equities literature, then carried to a **121-symbol cross-section** and a
 **propagator deconvolution** that separates the bare impact kernel from flow memory, and finally
 to a **41-symbol Hawkes endogeneity panel** and an **execution-cost replay** built on the kernels
-those phases measured.
+those phases measured — then re-run end to end in **two further regimes**, an adjacent month and
+a month three years later, to find out which of the results are laws and which are June 2023.
 
 This is a learning-first research project. Every Phase-1 result was chosen because a published
 benchmark exists to check it against; novelty is explicitly not the goal. Each result is reported
@@ -14,8 +15,8 @@ with its sample period, sample size, standard error, and the specific reasons it
 
 **If you are here to understand the concepts rather than run the code, read
 [LEARNING.md](LEARNING.md)** — it explains the order book, autocorrelation, impact, OFI, Hawkes
-self-excitation, and the statistics behind every number below, and closes with an 18-question
-interview drill.
+self-excitation, temporal robustness, and the statistics behind every number below, and closes
+with a 21-question interview drill.
 
 ## Data
 
@@ -23,7 +24,8 @@ interview drill.
 |---|---|
 | Source | [data.binance.vision](https://data.binance.vision) public dumps (free, no account) |
 | Market | USDT-M perpetual futures |
-| Symbols | BTCUSDT, ETHUSDT (Phase 1); a 207-symbol universe, 121 analyzed (Phase 2); a 41-symbol endogeneity panel and a 6-symbol execution panel (Phase 3) |
+| Symbols | BTCUSDT, ETHUSDT (Phase 1); a 207-symbol universe, 121 analyzed (Phase 2); a 41-symbol endogeneity panel and a 6-symbol execution panel (Phase 3); the same 207-symbol universe re-run for 2023-07 and 2026-07 (Phase 4) |
+| Regimes | 2023-06 (baseline), 2023-07 (adjacent month), 2026-07 (three years on) |
 | `aggTrades` | **105,147,096** raw prints — BTC + ETH, 2023-06 and 2023-07 |
 | `bookTicker` | **114,231,299** L1 quote updates — ETH, **14 days**, 2023-06-01 to 2023-06-14 |
 | Resolution | millisecond timestamps |
@@ -248,6 +250,58 @@ an assumption that cuts hardest against precisely the reactive schedule.
 
 [Full results and caveats →](results/q7_execution.md)
 
+### Phase 4 — does any of it hold over time?
+
+Phase 4 runs the falsifier the project has been carrying since Phase 2: every number above comes
+from **June 2023**. The whole Q4 cross-section and the Q6 panel were re-run unchanged on two more
+months — **2023-07** (adjacent) and **2026-07** (three years on) — against the *same fixed
+207-symbol universe*, so the panel is comparable rather than merely contemporaneous. Symbols that
+listed after June 2023 are deliberately excluded from every regime; this asks what happened to the
+2023 panel, not what the 2026 market looks like.
+
+#### Q8 — same sign in all three regimes, and that is the weakest true thing you can say
+
+![Regime comparison](results/q8_regimes.png)
+
+| regime | n | flip slope | flip R² | γ slope | γ R² | γ median | α median | α R² vs activity |
+|---|---|---|---|---|---|---|---|---|
+| 2023-06 (baseline) | 121 | +0.1114 | 0.2632 | −0.0112 | 0.0003 | 0.3270 | 0.7070 (n=41) | 0.0017 |
+| 2023-07 | 117 | +0.0920 | 0.2328 | −0.0225 | 0.0086 | 0.3221 | 0.6925 (n=41) | 0.0056 |
+| 2026-07 | 46 | +0.0230 | 0.0113 | **+0.1683** | **0.2441** | 0.1991 | 0.5766 (n=32) | 0.0000060 |
+
+**The flip law keeps its sign in every regime and loses its strength**: slope 0.1114 → 0.0920 →
+0.0230 (**0.83× then 0.21×** baseline), R² 0.2632 → 0.2328 → 0.0113. The adjacent month is a
+genuine out-of-sample pass. 2026 is not — a slope of 0.0230 sits below its own stderr of 0.0325.
+**γ's liquidity-invariance holds in both 2023 months (R² 0.0003 / 0.0086) and breaks in 2026-07
+(R² 0.2441, n = 46)**, with a sign flip as well as a magnitude jump; it is the only sign flip in
+the table, and [LEARNING.md §7.6](LEARNING.md#76-three-liquidity-invariants--offered-as-a-hypothesis-with-its-falsifiers)
+has been updated to say the hypothesis half-failed its own named falsifier. **α stays
+liquidity-invariant in all three** (2026's R² = 0.0000060 is the flattest line in the project)
+while its *level* drifts down monotonically: **median α̂ 0.7070 → 0.6925 → 0.5766**.
+
+**The 2026 collapse has two readings and this data does not choose between them.** Universe
+accounting, 207 requested in every regime: **2023-07 → 117 pass / 87 below the 1M-event floor / 3
+no data; 2026-07 → 46 pass / 93 below floor / 68 with no data at all** (delisted or migrated —
+cross-checked 68/68 against the external download-missing record). Only 40 of the 46 are also in
+the 2023-06 successful set. Survivors are the symbols that stayed liquid, which *compresses the
+activity axis the flip law regresses on* — so a collapsed R² on n = 46 with a truncated x-range is
+consistent with a broken law and with an intact law measured through a broken panel. Three runs
+would discriminate: re-run 2026-07 on its **own top-207-by-activity universe**, fill in
+**2024-07/2025-07** to tell a gradual decay from an abrupt break, and refit the **2023 baseline
+restricted to the 40 survivors**. None were run. Symbol-level rank correlation tells the same
+story of a thinning panel: p_flip ρ = 0.758 one month out on 101 symbols, ρ = 0.292 three years
+out on 40.
+
+**Endogeneity's drift is the cleanest 2026 signal**, because it is a level rather than a slope and
+so is immune to the lever-arm problem that guts the flip-law comparison — about 71% of aggressor
+events being reactions in 2023-06, about 58% in 2026-07, on the same panel construction with the
+same estimator, monotone through the intermediate month. Its own caveat grew, though: the
+MLE-vs-count-variance gap widened 0.2395 → 0.2636 → 0.2977, so the exponential-kernel lower bound
+is doing more work in 2026 than it was in 2023.
+
+[Full results and caveats →](results/q8_regimes.md) ·
+[LEARNING.md §8](LEARNING.md#8-phase-4-does-it-hold-over-time)
+
 ## Reproducing from a fresh clone
 
 ### 1. Environment
@@ -390,6 +444,51 @@ extra raw-clock-time fit per symbol to measure the seasonality bias. Each sub-wi
 the first three and remaining days of the requested range, so shifting `--start-day` /`--end-day`
 shifts both windows together.
 
+### 7. Run the Phase-4 regime comparison
+
+Phase 4 reuses the Q4 and Q6 CLIs unchanged, pointed at a different month and a different output
+directory. The universe file is **the same 2023-06 list in every regime** — that is the point, and
+changing it would make the comparison uninterpretable. Each regime needs that month's `aggTrades`
+synced first; in 2026-07 many symbols have nothing to download, and that failure list is the
+survivorship record rather than an error.
+
+```bash
+# Regime runs: Q4 cross-section for each period, same universe file
+for PERIOD in 2023-07 2026-07; do
+  uv run python -m microstructure.analyses.q4_cross_section \
+      --root data --out "results/regimes/$PERIOD" \
+      --symbols-file results/universe_2023-06.txt \
+      --period "$PERIOD" --min-events 1000000 --max-lag 1000
+
+  uv run python -m microstructure.analyses.q6_endogeneity \
+      --root data --out "results/regimes/$PERIOD" \
+      --symbols-file results/q6_symbols_2023-06.txt \
+      --month "$PERIOD" --top-n 40 --windows 6
+done
+```
+
+```bash
+# Q8: the comparator. Baseline is the committed 2023-06 results/ directory.
+uv run python -m microstructure.analyses.q8_regimes \
+    --out results \
+    --baseline-dir results --baseline-label 2023-06 \
+    --regime 2023-07=results/regimes/2023-07 \
+    --regime 2026-07=results/regimes/2026-07 \
+    --download-missing 2026-07=results/regimes/nonsurvivors_2026-07_download.txt
+```
+
+`--regime LABEL=DIR` is repeatable, so adding 2024-07 or 2025-07 is one more flag once the data is
+synced. `--download-missing LABEL=FILE` is the honesty check: it takes an independent list of
+symbols that had **no data to download** for that period and reconciles it against the Q4 run's
+own `failures` list, so a symbol silently dropped by a sync bug cannot be quietly recorded as a
+delisting. For 2026-07 the two lists match exactly, 68 symbols in both. Omit the flag and the
+cross-check field is simply `null` rather than a false pass.
+
+Q8 recomputes every regression from the per-symbol records with its own OLS rather than trusting
+the upstream jsons' stored regression blocks, and reports any disagreement beyond 1e-06 as an
+explicit warning in the output. It reads only committed artifacts, so it runs in seconds and needs
+no `data/`.
+
 ## Repo map
 
 ```
@@ -419,11 +518,14 @@ src/microstructure/
 │   ├── q4_cross_section.py      # → q4_*.png/.md/.json/.parquet (Phase 2)
 │   ├── q5_kernel_panel.py       # → q5_*.png/.md/.json (Phase 2)
 │   ├── q6_endogeneity.py        # → q6_*.png/.md/.json/.parquet (Phase 3)
-│   └── q7_execution.py          # → q7_*.png/.md/.json (Phase 3)
+│   ├── q7_execution.py          # → q7_*.png/.md/.json (Phase 3)
+│   └── q8_regimes.py            # → q8_*.png/.md/.json (Phase 4 regime comparator)
 └── synthetic.py        # series with KNOWN properties, for estimator validation
 
 tests/                  # pytest; estimators checked against synthetic ground truth
 results/                # figures + per-question write-ups with methodology and caveats
+└── regimes/<period>/   # Phase-4 re-runs of Q4 and Q6 on 2023-07 and 2026-07
+site/                   # static results site; build_data.py derives site/data/*.json
 research/               # annotated literature library + adversarial novelty verification
 docs/superpowers/specs/ # design spec: goals, phases, data availability, honesty rules
 LEARNING.md             # concepts, judgment calls, and the interview drill
@@ -435,11 +537,21 @@ LEARNING.md             # concepts, judgment calls, and the interview drill
 
 Stated plainly, because they bound every number above:
 
-- **Single regime.** Q1 covers two months; Q2 and Q3 a single 14-day window on one symbol; Q4 and
-  Q6 a single month; Q5 a single **7-day** window and Q7 a **4-day** evaluation window. Phase 1.5
-  *measured* these statistics to be regime-dependent, so this is a documented risk rather than a
-  hypothetical one. Nothing here establishes that any result generalizes across periods or
-  volatility regimes.
+- **Three regimes for Q4/Q6, one for everything else.** Phase 4 re-ran the cross-section and the
+  endogeneity panel in 2023-07 and 2026-07, so "single regime" no longer applies to Q4 and Q6 —
+  but Q2 and Q3 are still a single 14-day window on one symbol, Q5 a single **7-day** window, and
+  Q7 a **4-day** evaluation window, none of which were repeated. And the regimes that were run
+  are three points with a three-year hole between the second and third: no 2024 or 2025 data, so a
+  gradual decay and an abrupt structural break are indistinguishable.
+- **The 2026 regime comparison is survivorship-confounded and cannot be decontaminated post hoc.**
+  Of 207 requested symbols, 2026-07 returns **46 successful, 93 below the 1M-event floor, and 68
+  with no data at all**. Survivors are the symbols that stayed liquid, which compresses the
+  activity axis that Q4's flip law regresses on — so the collapsed 2026 R² (0.0113) is consistent
+  both with the law breaking and with an intact law measured through a thin, range-truncated
+  panel. The three runs that would separate those are named in
+  [LEARNING.md §8.3](LEARNING.md#83-the-2026-collapse-has-two-readings-and-this-data-does-not-choose)
+  and none has been done. Relatedly, new post-2023 listings are excluded from every regime by
+  design, so nothing in Phase 4 describes the 2026 cross-section — only the fate of the 2023 panel.
 - **Exponential Hawkes kernel only.** Every Q6 branching ratio is a **lower bound**: an
   exponential kernel truncates long-range excitation a power-law kernel would capture. The
   one-directional 41/41 disagreement between the MLE and the count-variance estimator (median
@@ -464,6 +576,7 @@ Stated plainly, because they bound every number above:
   cannot distinguish a genuinely different β–γ relationship from a nonlinear impact process.
 - **Survivorship in the cross-section.** Q4's 121 symbols are those clearing 1M events; the 86
   skipped are all low-activity, so the bottom of the activity regression is a filtered population.
+  Phase 4 makes this worse, not better, in later regimes — see the 2026 bullet above.
 
 ## Literature
 
@@ -486,21 +599,34 @@ for a project whose goal is learning against published answer keys.
 
 ## Status
 
-Phase 1 (Q1–Q3), Phase 1.5 (Q0, Q1b), Phase 2 (Q4, Q5), the tick-size confound test (Q4b), and
-Phase 3 (Q6, Q7) complete.
+Phase 1 (Q1–Q3), Phase 1.5 (Q0, Q1b), Phase 2 (Q4, Q5), the tick-size confound test (Q4b),
+Phase 3 (Q6, Q7), and Phase 4 (Q8 — temporal robustness across 2023-06, 2023-07, 2026-07)
+complete.
 
-Next, in order of how much it would change the conclusions: a **power-law-kernel refit of Q6**,
-which is now the single highest-value follow-up in the project — it would test whether crypto is
-genuinely near-critical, and would simultaneously attribute or dismiss the one-directional 41/41
-estimator disagreement; a **window-sensitivity sweep on the count-variance n̂**, the competing
+The headline, stated at the resolution the evidence supports: **the cross-sectional laws hold out
+of sample one month later and degrade over three years** — with the 2026 degradation confounded by
+68 delistings and a 46-symbol panel, and endogeneity's downward drift (median α̂ 0.707 → 0.577) the
+cleanest evidence that something in the market itself actually moved.
+
+Next, in order of how much it would change the conclusions: **re-running 2026-07 on its own
+top-207-by-activity universe**, which is now the cheapest way to learn the most — it is a one-line
+universe change and it directly separates "the flip law broke" from "the 2023 panel emptied out";
+**filling in 2024-07 and 2025-07**, which would tell a gradual maturation from an abrupt
+structural break; **refitting the 2023-06 baseline restricted to the 40 symbols that survive to
+2026**, the cheapest of the three, which isolates the panel effect exactly; a **power-law-kernel
+refit of Q6**, which would test whether crypto is genuinely near-critical and would simultaneously
+attribute or dismiss the one-directional 41/41 estimator disagreement — a gap that Phase 4 showed
+*widening* across regimes (0.2395 → 0.2636 → 0.2977), making the refit more load-bearing than it
+was; a **window-sensitivity sweep on the count-variance n̂**, the competing
 explanation for that same gap; **re-running Q4b against mainnet exchangeInfo** once network access
 allows it, to replace the testnet-mirror tick sizes used here (activity was found to dominate,
 tick size a real but minor contributor — see [Q4b](results/q4b_tick_confound.md) — but that
 verdict rests on a documented substitute data source); **β fit over disjoint lag windows** to
 resolve whether Q4's anti-persistence and Q5's slow kernels are scale separation or estimator
-contamination; and a **repeat on a disjoint week and month**, since a single window cannot
-distinguish a law from a June — which is also the first falsifier for the liquidity-invariance
-pattern now visible in both γ̂ (Q4) and α̂ (Q6). Still queued from Phase 1: block-bootstrap
+contamination; and a **repeat of Q2/Q3/Q5/Q7 on a disjoint week**, the one part of the "single
+window" limitation Phase 4 did not touch — Q4 and Q6 now have their disjoint months, and the
+liquidity-invariance falsifier they were carrying came back split: γ̂'s invariance broke in
+2026-07, α̂'s held. Still queued from Phase 1: block-bootstrap
 intervals on γ̂ and the OFI slope, a Q3 bar-length sweep, and a signed-trade-volume comparison
 against book OFI — all using data already on disk.
 

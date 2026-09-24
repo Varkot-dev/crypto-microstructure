@@ -658,6 +658,109 @@ code, .num { font-family: var(--face-data); font-variant-numeric: tabular-nums; 
 .prose-note { font-size: var(--text-small); color: var(--ink-soft); }
 
 /* ============================================================
+   Regime table — the same instrument sheet, read across time.
+   Each row is one regime; the fit column keeps the tolerance-band
+   motif, drawing R² against the 0.05 flatness bar the comparator
+   actually verdicts on, so "flat" and "not flat" are geometry.
+   ============================================================ */
+.regime-wrap {
+  border: 1px solid var(--paper-edge);
+  background: var(--paper-sunk);
+  overflow-x: auto;
+}
+.regime-table {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: collapse;
+  font-family: var(--face-data);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.regime-table caption {
+  text-align: left;
+  padding: 0.7rem clamp(0.75rem, 1.6vw, 1.25rem);
+  border-bottom: 1px solid var(--paper-edge);
+  font-size: var(--text-micro);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.regime-table th,
+.regime-table td {
+  padding: 0.55rem clamp(0.5rem, 1.1vw, 0.9rem);
+  text-align: right;
+  border-bottom: 1px solid var(--paper-edge);
+  white-space: nowrap;
+}
+.regime-table thead th {
+  font-weight: 500;
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--paper-sunk);
+}
+.regime-table tbody tr { background: var(--paper); }
+.regime-table tbody tr[data-baseline="true"] { background: var(--paper-sunk); }
+.regime-table tbody tr:last-child th,
+.regime-table tbody tr:last-child td { border-bottom: 0; }
+.regime-table th[scope="row"] {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink);
+}
+.regime-table th[scope="row"] small {
+  display: block;
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.regime-table td[data-break="true"] { color: var(--flag); font-weight: 500; }
+
+/* The fit cell: an R² drawn against the flatness threshold. */
+.fit-cell { display: grid; gap: 0.25rem; justify-items: end; }
+.fit-track {
+  position: relative;
+  width: 6.5rem;
+  height: 0.5rem;
+  background: var(--paper-sunk);
+  border: 1px solid var(--paper-edge);
+}
+.fit-flat {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--band-wash);
+}
+.fit-bar {
+  position: absolute;
+  inset-block: 1px;
+  left: 0;
+  background: var(--plot);
+}
+.fit-bar[data-break="true"] { background: var(--flag); }
+
+/* Figure: the committed comparator PNG, framed like a plot sheet. */
+.regime-figure {
+  margin: var(--rhythm-tight) 0 0;
+  border: 1px solid var(--paper-edge);
+  background: var(--paper-sunk);
+}
+.regime-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid var(--paper-edge);
+}
+.regime-figure figcaption {
+  padding: 0.75rem clamp(0.75rem, 1.6vw, 1.25rem);
+  font-family: var(--face-body);
+  font-size: var(--text-caption);
+  color: var(--ink-faint);
+}
+
+/* ============================================================
    Method timeline — a typed sequence, so numbering is earned
    ============================================================ */
 .timeline {

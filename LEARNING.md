@@ -1544,7 +1544,7 @@ Every number in sections 6 and 7 came from **June 2023**. That is one month of o
 project's own "Known limitations" has said so from the start, and §7.6 listed "a different month"
 as a named falsifier for the liquidity-invariance hypothesis. Phase 4 runs that falsifier.
 
-The code it uses is `analyses/q8_regimes.py` → `results/q8_regimes.{json,md,png}`, reading the
+The code it uses is `src/microstructure/analyses/q8_regimes.py` → `results/q8_regimes.{json,md,png}`, reading the
 Q4 and Q6 artifacts from `results/` (baseline 2023-06) and `results/regimes/2023-07/` and
 `results/regimes/2026-07/`. No analysis was rewritten for Phase 4: the same Q4 and Q6 CLIs were
 re-pointed at two more months with `--out results/regimes/<period>`. That matters — if the
@@ -1648,7 +1648,7 @@ the artifact that should stop anyone from writing Reading A as a conclusion:
 | 2026-07 | 207 | **46** | **93** | **68** |
 
 Sixty-eight of the original 207 symbols have **no 2026-07 data to download** — AGIX, MATIC, FTM,
-RNDR, OMG, TOMO, all the BUSD pairs, and 60 more. They are delisted, renamed, or migrated. A
+RNDR, OMG, TOMO, all the BUSD pairs, and 45 more. They are delisted, renamed, or migrated. A
 further 93 downloaded but fell below the one-million-event floor. Only **46 cleared the bar**, and
 of those only **40 are also in the 2023-06 successful set**. The Q6 panel shrinks 41 → 32 the
 same way.

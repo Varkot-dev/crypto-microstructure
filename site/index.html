@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Order flow and impact on Binance — measured results</title>
-<meta name="description" content="Long-memory order flow, deconvolved impact kernels, and Hawkes endogeneity measured across a 121-symbol Binance perpetual-futures cross-section from 100M+ raw trades.">
+<meta name="description" content="Long-memory order flow, deconvolved impact kernels, and Hawkes endogeneity measured across a 121-symbol Binance perpetual-futures cross-section from 100M+ raw trades, then re-tested across three market regimes.">
 <meta name="color-scheme" content="light dark">
 
 <meta property="og:title" content="Order flow and impact on Binance — measured results">
@@ -35,6 +35,7 @@
       <a href="#kernels">Kernels</a>
       <a href="#endogeneity">Endogeneity</a>
       <a href="#execution">Execution</a>
+      <a href="#regimes">Over time</a>
       <a href="#method">Verification</a>
     </nav>
   </div>
@@ -65,6 +66,7 @@
         <div><dt>Cross-section analyzed</dt><dd>121 symbols</dd></div>
         <div><dt>Kernels deconvolved</dt><dd>16 symbols</dd></div>
         <div><dt>Endogeneity panel</dt><dd>41 symbols</dd></div>
+        <div><dt>Regimes re-measured</dt><dd>3 · 2023-06 → 2026-07</dd></div>
         <div><dt>Estimator tests vs. synthetic truth</dt><dd>171</dd></div>
       </dl>
     </div>
@@ -292,6 +294,48 @@
 </section>
 
 <!-- ============================================================
+     Regimes — temporal robustness
+     ============================================================ -->
+<section class="section" id="regimes" aria-labelledby="r-heading">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Q8 · 3 regimes · 2023-06 → 2026-07</p>
+        <h2 id="r-heading">Does it hold over time?</h2>
+      </div>
+      <div>
+        <p>
+          Everything above is June 2023. So the cross-section and the endogeneity panel were re-run
+          unchanged on two more months — the one after, and one three years later — against the
+          <em>same fixed 207-symbol universe</em>. A cross-sectional law tested out of sample in
+          time asks whether the shape of the cross-section is a property of markets or a property
+          of that month.
+        </p>
+        <p class="prose-note">
+          Symbols listed after June 2023 are excluded from every regime by design, so this asks
+          what happened to the 2023 panel — not what the 2026 market looks like.
+        </p>
+      </div>
+    </div>
+
+    <div class="regime-wrap reveal" id="r-table">
+      <p class="loading" style="padding:1rem">Loading regimes…</p>
+    </div>
+
+    <figure class="regime-figure reveal">
+      <img src="assets/q8_regimes.png" width="2834" height="809" loading="lazy" decoding="async"
+           alt="Three panels comparing regimes: the flip-probability law fitted per regime, gamma against activity per regime, and a symbol-level scatter of p_flip in 2023-06 against 2026-07 with a y=x reference line.">
+      <figcaption id="r-figcaption"></figcaption>
+    </figure>
+
+    <div class="callout reveal">
+      <h3>Same sign in all three, and that is the weakest true thing to say</h3>
+      <p id="r-callout"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
      Method & verification
      ============================================================ -->
 <section class="section" id="method" aria-labelledby="m-heading">
@@ -438,11 +482,13 @@ uv run pytest -m "not network" -q</code></pre>
       <div>
         <p class="eyebrow">The caveat that applies to everything above</p>
         <p class="footer-caveat">
-          This is a single month — June 2023 — and therefore a single market regime. Order-flow
-          memory statistics are regime-dependent by this project's own Phase-1.5 diagnostics, so
-          none of these results are established as generalizing to other months or volatility
-          regimes. The cross-section is also survivorship-filtered: 86 of 207 requested symbols
-          fell below the one-million-event floor and were skipped.
+          The headline numbers are June 2023 — one market regime. The cross-section and the
+          endogeneity panel have since been re-measured in two more (see
+          <a href="#regimes">Over time</a>): the laws hold one month out and degrade over three
+          years, and the 2026 comparison is itself confounded by 68 delistings and a 46-symbol
+          surviving panel. The kernel and execution results were never repeated at all. Every
+          cross-section is also survivorship-filtered by the one-million-event floor — 86 of 207
+          requested symbols fell below it in the baseline month alone.
         </p>
       </div>
     </div>

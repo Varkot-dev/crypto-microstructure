@@ -1,7 +1,7 @@
 /**
  * Binance microstructure results site.
  *
- * Loads the four derived slices written by build_data.py and draws them.
+ * Loads the five derived slices written by build_data.py and draws them.
  * Every displayed number originates in results/*.json; nothing is computed
  * here beyond formatting, axis ranges, and the OLS lines whose coefficients
  * come from the source artifacts' own regression blocks.
@@ -12,6 +12,7 @@ const DATA = {
   kernels: 'data/kernels.json',
   endogeneity: 'data/endogeneity.json',
   execution: 'data/execution.json',
+  regimes: 'data/regimes.json',
 };
 
 const PLOT_CONFIG = {
@@ -601,6 +602,120 @@ function initExecution(data) {
 }
 
 /* ============================================================
+   5 — Regimes: the same laws, read across three months
+   ============================================================ */
+
+/**
+ * Build the regime table. No Plotly here — this is a table because the
+ * comparison is six numbers across three rows, and the figure that does
+ * need a plot is the committed q8_regimes.png sitting under it.
+ *
+ * The fit column keeps the site's tolerance-band motif: R² is drawn as a
+ * bar against the 0.05 flatness threshold the comparator actually verdicts
+ * on, so "flat" and "not flat" read as geometry rather than as a decimal.
+ */
+function initRegimes(data) {
+  const wrap = document.getElementById('r-table');
+  const flat = data.gamma_flat_r2_threshold;
+  // Domain wide enough for the largest R² in the table plus headroom, so
+  // the threshold marker never sits flush against the right edge.
+  const domain = Math.max(flat * 2, ...data.rows.map((r) => r.gamma_r2), 0.3);
+  const pct = (v) => Math.min(100, (v / domain) * 100);
+
+  const fitCell = (r2, isBreak) => `
+    <span class="fit-cell">
+      <span class="fit-track" role="img"
+            aria-label="R squared ${fmt(r2, 4)} against a flatness threshold of ${flat}${
+              isBreak ? ', above the threshold' : ', below the threshold'
+            }">
+        <span class="fit-flat" style="width:${pct(flat)}%"></span>
+        <span class="fit-bar" data-break="${isBreak}" style="width:${pct(r2)}%"></span>
+      </span>
+      <span>${fmt(r2, 4)}</span>
+    </span>`;
+
+  const body = data.rows
+    .map((r) => {
+      const gammaBreak = r.gamma_r2 >= flat;
+      const universe = r.requested
+        ? `${r.n_success} / ${r.n_below_floor} / ${r.n_no_data}`
+        : '—';
+      const ratio =
+        r.flip_slope_ratio === null ? '—' : `${fmt(r.flip_slope_ratio, 2)}×`;
+      return `
+      <tr data-baseline="${r.is_baseline}">
+        <th scope="row">${r.label}${r.is_baseline ? '<small>baseline</small>' : ''}</th>
+        <td>${r.n_success}</td>
+        <td>${sign(r.flip_slope)}</td>
+        <td>${ratio}</td>
+        <td>${fmt(r.flip_r2, 4)}</td>
+        <td data-break="${gammaBreak}">${sign(r.gamma_slope)}</td>
+        <td>${fitCell(r.gamma_r2, gammaBreak)}</td>
+        <td>${fmt(r.alpha_median, 4)}<small> n=${r.alpha_n}</small></td>
+        <td>${universe}</td>
+      </tr>`;
+    })
+    .join('');
+
+  wrap.innerHTML = `
+    <table class="regime-table">
+      <caption>Q8 · the cross-section re-measured in three regimes · same fixed 207-symbol universe</caption>
+      <thead>
+        <tr>
+          <th scope="col">Regime</th>
+          <th scope="col">n</th>
+          <th scope="col">p_flip slope</th>
+          <th scope="col">vs. base</th>
+          <th scope="col">p_flip R²</th>
+          <th scope="col">γ slope</th>
+          <th scope="col">γ R² vs. ${flat} flat bar</th>
+          <th scope="col">α median</th>
+          <th scope="col">pass / floor / no data</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>`;
+
+  const [base, , last] = data.rows;
+  const mid = data.rows[1];
+
+  document.getElementById('r-figcaption').textContent =
+    `results/q8_regimes.png — the flip law fitted per regime, γ against activity per ` +
+    `regime, and every symbol's p_flip in ${base.label} against ${last.label} with a ` +
+    `y = x reference. Rank correlation on the overlap falls from ` +
+    `ρ = ${fmt(mid.p_flip_spearman, 3)} on ${mid.n_overlap} symbols one month out to ` +
+    `ρ = ${fmt(last.p_flip_spearman, 3)} on ${last.n_overlap} symbols three years out.`;
+
+  document.getElementById('r-callout').textContent =
+    `The p_flip slope keeps its sign in all three regimes and loses its strength: ` +
+    `${sign(base.flip_slope)} → ${sign(mid.flip_slope)} → ${sign(last.flip_slope)}, ` +
+    `or ${fmt(mid.flip_slope_ratio, 2)}× then ${fmt(last.flip_slope_ratio, 2)}× the ` +
+    `baseline, with R² falling ${fmt(base.flip_r2, 4)} → ${fmt(mid.flip_r2, 4)} → ` +
+    `${fmt(last.flip_r2, 4)}. The adjacent month is a real out-of-sample pass; ` +
+    `${last.label} is not — that slope sits below its own stderr of ` +
+    `${fmt(last.flip_stderr, 4)}. γ's liquidity-invariance holds in both 2023 months ` +
+    `and breaks in ${last.label} (R² ${fmt(last.gamma_r2, 4)}, n = ${last.n_success}), ` +
+    `the only sign flip in the table. A drop-one-out check on that regression: the slope ` +
+    `stays positive removing any single symbol (range ${fmt(last.gamma_influence?.loo_slope_min, 4)}–` +
+    `${fmt(last.gamma_influence?.loo_slope_max, 4)}), so the break's direction survives; but R² ` +
+    `swings ${fmt(last.gamma_influence?.loo_r2_min, 4)} (dropping ${last.gamma_influence?.loo_r2_min_symbol})–` +
+    `${fmt(last.gamma_influence?.loo_r2_max, 4)} (dropping ${last.gamma_influence?.loo_r2_max_symbol}), ` +
+    `so its strength is outlier-sensitive — ${last.gamma_influence?.top_cooks_d_symbols?.join(', ')} ` +
+    `are the highest-influence points by Cook's distance. But the comparison is not clean: of ` +
+    `${last.requested} symbols requested, ${last.n_no_data} had no data to download at ` +
+    `all and ${last.n_below_floor} fell below the one-million-event floor, leaving ` +
+    `${last.n_success}. Survivors are the symbols that stayed liquid, which compresses ` +
+    `the very activity axis the flip law regresses on — so a collapsed R² here is ` +
+    `equally consistent with a broken law and with an intact law measured through a ` +
+    `thin, range-truncated panel. This data does not choose. The cleanest signal that ` +
+    `something in the market itself moved is endogeneity, because it is a level rather ` +
+    `than a slope and so is immune to that problem: median α̂ ` +
+    `${fmt(base.alpha_median, 4)} → ${fmt(mid.alpha_median, 4)} → ` +
+    `${fmt(last.alpha_median, 4)}, monotone, on the same panel construction with the ` +
+    `same estimator.`;
+}
+
+/* ============================================================
    Scroll reveal + nav state
    ============================================================ */
 
@@ -675,12 +790,23 @@ async function boot() {
   initMotion();
   initNav();
 
+  // The regime table is plain DOM, so it must not wait on — or be taken
+  // down by — the Plotly CDN the other four sections depend on.
+  const regimes = (async () => {
+    try {
+      initRegimes(await loadJSON(DATA.regimes));
+    } catch (err) {
+      failPlot('r-table', err);
+    }
+  })();
+
   try {
     await whenPlotlyReady();
   } catch (err) {
     ['cs-plot', 'k-plot', 'e-plot', 'e-plot2', 'x-plot'].forEach((id) =>
       failPlot(id, err),
     );
+    await regimes;
     return;
   }
 
@@ -701,6 +827,7 @@ async function boot() {
       }
     }),
   );
+  await regimes;
 
   // Redraw on theme flip so plot ink tracks the page.
   const scheme = window.matchMedia('(prefers-color-scheme: dark)');

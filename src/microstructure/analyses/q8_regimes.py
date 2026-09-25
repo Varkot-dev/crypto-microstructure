@@ -136,6 +136,76 @@ def _recompute_q4_regressions(q4_records: list[dict]) -> dict:
     }
 
 
+def _gamma_influence(q4_records: list[dict]) -> dict | None:
+    """Drop-one-out + Cook's distance for the γ-vs-log10(activity) regression.
+
+    Quantifies how outlier-sensitive a regime's γ law is, rather than
+    leaving it as an eyeballed "a handful of outliers could manufacture
+    this R²" guess. For each symbol, refits the regression with that
+    symbol removed and records the resulting slope/R², plus each point's
+    Cook's distance (leverage-weighted squared residual) on the full fit.
+    Returns None if fewer than 4 records (need >=3 after one drop).
+    """
+    if len(q4_records) < 4:
+        return None
+    names = [r["symbol"] for r in q4_records]
+    x = np.array([np.log10(r["n_events"]) for r in q4_records])
+    y = np.array([r["gamma"] for r in q4_records])
+    n = x.size
+
+    full = _ols_with_intercept(x, y)
+    if full is None:
+        return None
+
+    design = np.column_stack([np.ones(n), x])
+    hat = design @ np.linalg.inv(design.T @ design) @ design.T
+    leverage = np.diag(hat)
+    resid = y - (full["intercept"] + full["slope"] * x)
+    p_params = 2
+    mse = float(resid @ resid) / (n - p_params)
+    cook_d = (resid**2 / (p_params * mse)) * (leverage / (1.0 - leverage) ** 2)
+
+    per_symbol = []
+    for i in range(n):
+        keep = np.ones(n, dtype=bool)
+        keep[i] = False
+        refit = _ols_with_intercept(x[keep], y[keep])
+        per_symbol.append(
+            {
+                "symbol": names[i],
+                "cooks_d": float(cook_d[i]),
+                "leverage": float(leverage[i]),
+                "loo_slope": refit["slope"] if refit else None,
+                "loo_r2": refit["r2"] if refit else None,
+                "delta_r2": (refit["r2"] - full["r2"]) if refit else None,
+            }
+        )
+
+    loo_slope = [p["loo_slope"] for p in per_symbol if p["loo_slope"] is not None]
+    by_cook = sorted(per_symbol, key=lambda p: -p["cooks_d"])
+    min_r2_entry = min(per_symbol, key=lambda p: p["loo_r2"])
+    max_r2_entry = max(per_symbol, key=lambda p: p["loo_r2"])
+    min_slope_entry = min(per_symbol, key=lambda p: p["loo_slope"])
+    max_slope_entry = max(per_symbol, key=lambda p: p["loo_slope"])
+
+    return {
+        "full_slope": full["slope"],
+        "full_r2": full["r2"],
+        "n": n,
+        "loo_r2_min": min_r2_entry["loo_r2"],
+        "loo_r2_min_symbol": min_r2_entry["symbol"],
+        "loo_r2_max": max_r2_entry["loo_r2"],
+        "loo_r2_max_symbol": max_r2_entry["symbol"],
+        "loo_slope_min": min_slope_entry["loo_slope"],
+        "loo_slope_min_symbol": min_slope_entry["symbol"],
+        "loo_slope_max": max_slope_entry["loo_slope"],
+        "loo_slope_max_symbol": max_slope_entry["symbol"],
+        "slope_stays_positive_every_drop": bool(all(s > 0 for s in loo_slope)) if loo_slope else None,
+        "top_cooks_d": by_cook[:3],
+        "per_symbol": per_symbol,
+    }
+
+
 def _recompute_q6_regression(q6_records: list[dict]) -> dict | None:
     if not q6_records:
         return None
@@ -379,6 +449,7 @@ def _regime_summary(q4: dict, q6: dict | None) -> dict:
         "flip_law_mismatch_warning": flip_mismatch,
         "gamma_law": recomputed["gamma_vs_activity"],
         "gamma_law_mismatch_warning": gamma_mismatch,
+        "gamma_influence": _gamma_influence(records),
         "gamma_median": float(np.median(gamma_vals)) if gamma_vals.size else None,
         "gamma_iqr": (
             float(np.percentile(gamma_vals, 75) - np.percentile(gamma_vals, 25))
@@ -730,6 +801,43 @@ def _write_md(
             "**not** hold uniformly across every regime examined here."
         )
     lines.append("")
+
+    above_threshold = [
+        label for label, r2 in law_stability["gamma_r2_by_label"].items() if r2 >= GAMMA_FLAT_R2_THRESHOLD
+    ]
+    if above_threshold:
+        lines.append("### γ-break outlier sensitivity (drop-one-out)")
+        lines.append("")
+        for label in above_threshold:
+            display = baseline_label if label == "__baseline__" else label
+            summary = baseline_summary if label == "__baseline__" else regime_summaries[label]
+            influence = summary.get("gamma_influence")
+            if influence is None:
+                continue
+            top = influence["top_cooks_d"]
+            top_desc = "; ".join(
+                f"{t['symbol']} (Cook's D={t['cooks_d']:.3f}, leverage={t['leverage']:.3f})" for t in top
+            )
+            stays_positive = influence["slope_stays_positive_every_drop"]
+            lines.append(
+                f"For **{display}** (n={influence['n']}, full-sample slope="
+                f"{influence['full_slope']:.4f}, R²={influence['full_r2']:.4f}), a "
+                "drop-one-out refit of γ vs. log10(activity) — removing each symbol one at "
+                "a time and re-fitting — gives an **R² range of "
+                f"[{influence['loo_r2_min']:.4f} (dropping {influence['loo_r2_min_symbol']}), "
+                f"{influence['loo_r2_max']:.4f} (dropping {influence['loo_r2_max_symbol']})]** "
+                f"and a **slope range of [{influence['loo_slope_min']:.4f} (dropping "
+                f"{influence['loo_slope_min_symbol']}), {influence['loo_slope_max']:.4f} "
+                f"(dropping {influence['loo_slope_max_symbol']})]**. The highest-influence "
+                f"points by Cook's distance are {top_desc}. The slope "
+                + ("**stays positive under every single-symbol removal**" if stays_positive else "does **not** stay positive under every single-symbol removal")
+                + " — the break's direction is not an artifact of any one symbol — but R² "
+                "swings by a large relative amount depending on which point is dropped, so "
+                "the *strength* (not the sign) of the break is outlier-sensitive. This "
+                "replaces an earlier unquantified 'a handful of outliers' hedge with the "
+                "measured sensitivity."
+            )
+            lines.append("")
 
     lines.append("## Survivorship")
     lines.append("")

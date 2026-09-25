@@ -265,6 +265,29 @@ def build_regimes() -> None:
             "n_no_data": acct["n_failed_no_data"] if acct else None,
             "n_overlap": rank["n_overlap"] if rank else None,
             "p_flip_spearman": rank["p_flip_spearman"] if rank else None,
+            # Drop-one-out γ-break sensitivity (only present for regimes above the
+            # γ-flat R² threshold); trimmed to what the site callout needs, not the
+            # full per-symbol array.
+            "gamma_influence": (
+                {
+                    "loo_r2_min": s["gamma_influence"]["loo_r2_min"],
+                    "loo_r2_min_symbol": s["gamma_influence"]["loo_r2_min_symbol"],
+                    "loo_r2_max": s["gamma_influence"]["loo_r2_max"],
+                    "loo_r2_max_symbol": s["gamma_influence"]["loo_r2_max_symbol"],
+                    "loo_slope_min": s["gamma_influence"]["loo_slope_min"],
+                    "loo_slope_min_symbol": s["gamma_influence"]["loo_slope_min_symbol"],
+                    "loo_slope_max": s["gamma_influence"]["loo_slope_max"],
+                    "loo_slope_max_symbol": s["gamma_influence"]["loo_slope_max_symbol"],
+                    "slope_stays_positive_every_drop": s["gamma_influence"][
+                        "slope_stays_positive_every_drop"
+                    ],
+                    "top_cooks_d_symbols": [
+                        t["symbol"] for t in s["gamma_influence"]["top_cooks_d"]
+                    ],
+                }
+                if s.get("gamma_influence")
+                else None
+            ),
         }
 
     labels = [src["baseline_label"], *src["regime_labels"]]

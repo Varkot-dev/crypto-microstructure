@@ -29,6 +29,10 @@ Flip-law slope ratio vs. baseline, per regime:
 
 **γ invariance**: at least one regime's γ-vs-activity R² is at or above 0.05 (2026-07) — γ's liquidity-invariance does **not** hold uniformly across every regime examined here.
 
+### γ-break outlier sensitivity (drop-one-out)
+
+For **2026-07** (n=46, full-sample slope=0.1683, R²=0.2441), a drop-one-out refit of γ vs. log10(activity) — removing each symbol one at a time and re-fitting — gives an **R² range of [0.1738 (dropping BTCUSDT), 0.2959 (dropping LTCUSDT)]** and a **slope range of [0.1442 (dropping BTCUSDT), 0.1867 (dropping YFIUSDT)]**. The highest-influence points by Cook's distance are BTCUSDT (Cook's D=0.168, leverage=0.165); YFIUSDT (Cook's D=0.130, leverage=0.062); LTCUSDT (Cook's D=0.112, leverage=0.045). The slope **stays positive under every single-symbol removal** — the break's direction is not an artifact of any one symbol — but R² swings by a large relative amount depending on which point is dropped, so the *strength* (not the sign) of the break is outlier-sensitive. This replaces an earlier unquantified 'a handful of outliers' hedge with the measured sensitivity.
+
 ## Survivorship
 
 **2023-07**: 101/121 baseline symbols survive into this regime's successful set (117 symbols total in this regime). 20 non-survivor(s).

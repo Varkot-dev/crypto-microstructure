@@ -275,7 +275,12 @@ genuine out-of-sample pass. 2026 is not — a slope of 0.0230 sits below its own
 **γ's liquidity-invariance holds in both 2023 months (R² 0.0003 / 0.0086) and breaks in 2026-07
 (R² 0.2441, n = 46)**, with a sign flip as well as a magnitude jump; it is the only sign flip in
 the table, and [LEARNING.md §7.6](LEARNING.md#76-three-liquidity-invariants--offered-as-a-hypothesis-with-its-falsifiers)
-has been updated to say the hypothesis half-failed its own named falsifier. **α stays
+has been updated to say the hypothesis half-failed its own named falsifier. A drop-one-out
+outlier check on the 2026-07 break — [LEARNING §8.2](LEARNING.md#82-three-verdicts-with-the-numbers)
+— shows the slope stays positive removing any single symbol (range 0.1442–0.1867) but R² swings
+0.1738–0.2959 depending on which point is dropped (BTCUSDT, YFIUSDT highest-influence by Cook's
+distance): the break's direction is not an artifact of one symbol, its strength is
+outlier-sensitive. **α stays
 liquidity-invariant in all three** (2026's R² = 0.0000060 is the flattest line in the project)
 while its *level* drifts down monotonically: **median α̂ 0.7070 → 0.6925 → 0.5766**.
 

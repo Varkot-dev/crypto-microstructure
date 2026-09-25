@@ -695,7 +695,13 @@ function initRegimes(data) {
     `${last.label} is not — that slope sits below its own stderr of ` +
     `${fmt(last.flip_stderr, 4)}. γ's liquidity-invariance holds in both 2023 months ` +
     `and breaks in ${last.label} (R² ${fmt(last.gamma_r2, 4)}, n = ${last.n_success}), ` +
-    `the only sign flip in the table. But the comparison is not clean: of ` +
+    `the only sign flip in the table. A drop-one-out check on that regression: the slope ` +
+    `stays positive removing any single symbol (range ${fmt(last.gamma_influence?.loo_slope_min, 4)}–` +
+    `${fmt(last.gamma_influence?.loo_slope_max, 4)}), so the break's direction survives; but R² ` +
+    `swings ${fmt(last.gamma_influence?.loo_r2_min, 4)} (dropping ${last.gamma_influence?.loo_r2_min_symbol})–` +
+    `${fmt(last.gamma_influence?.loo_r2_max, 4)} (dropping ${last.gamma_influence?.loo_r2_max_symbol}), ` +
+    `so its strength is outlier-sensitive — ${last.gamma_influence?.top_cooks_d_symbols?.join(', ')} ` +
+    `are the highest-influence points by Cook's distance. But the comparison is not clean: of ` +
     `${last.requested} symbols requested, ${last.n_no_data} had no data to download at ` +
     `all and ${last.n_below_floor} fell below the one-million-event floor, leaving ` +
     `${last.n_success}. Survivors are the symbols that stayed liquid, which compresses ` +

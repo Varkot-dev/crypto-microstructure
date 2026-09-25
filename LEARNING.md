@@ -1659,8 +1659,11 @@ which compresses the activity axis — and the flip law is a regression **on** t
 the range of the regressor and the slope estimate loses its lever arm; with n = 46 and a
 truncated x-range, an R² of 0.0113 is a lot less surprising than it looks. The same mechanism
 cuts the other way for γ: a panel of 46 higher-activity survivors is precisely where a
-previously-invisible relationship could become visible, or where four or five outliers could
-manufacture an R² of 0.24.
+previously-invisible relationship could become visible. A drop-one-out check (§8, n=46, full
+slope 0.1683, R²=0.2441) shows the break does not vanish on removing any single symbol — the
+slope stays positive under every drop (range 0.1442–0.1867) — but R² is materially
+outlier-sensitive, swinging 0.1738 (dropping BTCUSDT) to 0.2959 (dropping LTCUSDT); BTCUSDT and
+YFIUSDT carry the highest Cook's distance on the fit.
 
 **Note the deliberate asymmetry in the delisting count.** 68 "failed/missing" is a *fact about
 the market* — those contracts really did stop trading, and the comparator cross-checked that list
@@ -2284,9 +2287,14 @@ unchanged. An R² of 0.0113 on n = 46 with a truncated x-range is a lot less inf
 R² of 0.0113 on n = 121 spanning 1.33 decades. I can't tell those apart from what I ran.
 
 It also cuts the other way for γ. A narrow, high-activity 46-symbol panel is exactly where a
-relationship that was invisible across the full range could become visible, or where a handful of
-outliers could manufacture R² = 0.24. I'm not claiming the γ break is an artifact — I'm saying my
-data can't rule it out, and the direction of the concern is different for each law.
+relationship that was invisible across the full range could become visible. Here I did run the
+check: a drop-one-out refit of γ vs. log10(activity) shows single-point removal does not erase
+it — the slope stays positive under every single-symbol drop (range 0.1442–0.1867 vs. full-sample
+0.1683) — but R² is not robust to which point you drop (0.1738 dropping BTCUSDT to 0.2959
+dropping LTCUSDT, against a full-sample R² of 0.2441; BTCUSDT and YFIUSDT are the highest-Cook's-D
+points). So the break's direction is not an artifact of one symbol, but its magnitude is
+sensitive to a small number of high-leverage ones, and the direction of the concern is different
+for each law.
 
 One more distinction worth making, because conflating them would inflate the story: **68 "no
 data" is a fact about the market; 93 "below floor" is a fact about my filter.** Those 93 traded,

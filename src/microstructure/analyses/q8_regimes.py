@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import matplotlib
@@ -64,6 +65,17 @@ REGRESSION_MISMATCH_TOL = 1e-6
 # below this. Matches the informal "R² < 0.05" bar already used in Q4's
 # own findings language for a weak/no relationship.
 GAMMA_FLAT_R2_THRESHOLD = 0.05
+
+
+def _chrono_key(label: str) -> tuple:
+    """Sort key for a regime label: (YYYY, MM) parsed from a leading YYYY-MM
+    prefix, else the label itself (pushed after any parsed labels) so an
+    unexpected label format degrades to alphabetical rather than crashing.
+    """
+    m = re.match(r"^(\d{4})-(\d{2})", label)
+    if m:
+        return (0, int(m.group(1)), int(m.group(2)), label)
+    return (1, 0, 0, label)
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +333,11 @@ def _skip_fail_reason(q4: dict, symbol: str) -> str:
 
 
 def _universe_accounting(
-    regime_q4: dict, download_missing_symbols: set[str] | None
+    regime_q4: dict,
+    download_missing_symbols: set[str] | None,
+    *,
+    is_native: bool = False,
+    baseline_n_requested: int | None = None,
 ) -> dict:
     """Three-bucket breakdown of the regime's requested universe.
 
@@ -330,7 +346,11 @@ def _universe_accounting(
     parquet missing). These are read directly from the regime's own q4
     json (`n_symbols_successful` / `n_symbols_skipped` / `n_symbols_failed`
     and the `failures` list), which always sum to `n_symbols_requested` by
-    construction of the upstream Q4 run.
+    construction of the upstream Q4 run — this holds for BOTH a fixed-
+    universe regime (requested == baseline's universe) and a native-
+    universe regime (requested == that regime's own, different universe);
+    either way the buckets always sum to that regime's own total, never to
+    the baseline's.
 
     When `download_missing_symbols` is given (an optional external list of
     symbols known to have no downloadable data for this period, e.g. a
@@ -338,6 +358,13 @@ def _universe_accounting(
     regime's own `failures` symbol set and any mismatch is surfaced as a
     warning rather than silently trusted or ignored — consistent with this
     module's "recompute, don't trust blindly" approach elsewhere.
+
+    `is_native` / `baseline_n_requested`: when the regime is NOT flagged
+    native and its own `n_symbols_requested` differs from the baseline's,
+    that is a silent assumption violation (the caller presumably meant to
+    run this on the same fixed universe, or forgot to pass the native
+    flag) — surfaced as `universe_mismatch_warning` rather than allowed to
+    silently drive survivorship math against a differently-sized universe.
     """
     n_requested = regime_q4.get("n_symbols_requested")
     n_successful = regime_q4.get("n_symbols_successful")
@@ -351,6 +378,21 @@ def _universe_accounting(
         and n_successful + n_skipped + n_failed == n_requested
     )
 
+    universe_mismatch_warning = None
+    if (
+        not is_native
+        and baseline_n_requested is not None
+        and n_requested is not None
+        and n_requested != baseline_n_requested
+    ):
+        universe_mismatch_warning = (
+            "universe mismatch without native flag: this regime's n_symbols_requested "
+            f"({n_requested}) differs from the baseline's ({baseline_n_requested}) but the "
+            "regime was not passed in native_regimes — survivorship is still being computed "
+            "against the baseline's symbol set; pass this label in native_regimes if this "
+            "regime was actually run on its own, different universe."
+        )
+
     accounting = {
         "n_requested": n_requested,
         "n_successful": n_successful,
@@ -358,6 +400,7 @@ def _universe_accounting(
         "n_failed_no_data": n_failed,
         "reconciles": reconciles,
         "download_missing_cross_check": None,
+        "universe_mismatch_warning": universe_mismatch_warning,
     }
 
     if download_missing_symbols is not None:
@@ -401,6 +444,48 @@ def _survivorship(baseline_q4: dict, regime_q4: dict) -> dict:
     }
 
 
+def _overlap_comparison(baseline_q4: dict, regime_q4: dict) -> dict:
+    """Baseline-vs-regime overlap block for a NATIVE-universe regime.
+
+    Replaces survivorship (which assumes a shared requested universe) when
+    the regime was run on its own market-native universe instead: rather
+    than asking "which baseline symbols are absent here" (conflating
+    delistings with symbols that were never requested at all), this reports
+    the plain three-way set split — n_overlap, baseline-only count, and
+    regime-only count — plus Spearman rank correlation of p_flip/gamma on
+    the overlap, which is the actual survivorship-free comparison.
+    """
+    baseline_symbols = _symbol_set(baseline_q4)
+    regime_symbols = _symbol_set(regime_q4)
+    overlap = sorted(baseline_symbols & regime_symbols)
+    baseline_only = sorted(baseline_symbols - regime_symbols)
+    regime_only = sorted(regime_symbols - baseline_symbols)
+
+    base_records, regime_records = _overlap_records(baseline_q4, regime_q4)
+    p_flip_spearman = None
+    gamma_spearman = None
+    if overlap:
+        base_p_flip = np.array([r["p_flip"] for r in base_records])
+        regime_p_flip = np.array([r["p_flip"] for r in regime_records])
+        base_gamma = np.array([r["gamma"] for r in base_records])
+        regime_gamma = np.array([r["gamma"] for r in regime_records])
+        p_flip_spearman = spearman_corr(base_p_flip, regime_p_flip)
+        gamma_spearman = spearman_corr(base_gamma, regime_gamma)
+
+    return {
+        "n_baseline": len(baseline_symbols),
+        "n_regime": len(regime_symbols),
+        "n_overlap": len(overlap),
+        "n_baseline_only": len(baseline_only),
+        "n_regime_only": len(regime_only),
+        "overlap_symbols": overlap,
+        "baseline_only_symbols": baseline_only,
+        "regime_only_symbols": regime_only,
+        "p_flip_spearman": p_flip_spearman,
+        "gamma_spearman": gamma_spearman,
+    }
+
+
 def _overlap_records(baseline_q4: dict, regime_q4: dict) -> tuple[list[dict], list[dict]]:
     """Per-symbol q4 records for the baseline and regime, restricted to the overlap, symbol-sorted identically."""
     baseline_by_symbol = {r["symbol"]: r for r in baseline_q4["symbols"]}
@@ -425,8 +510,14 @@ def _q6_overlap_alpha(baseline_q6: dict | None, regime_q6: dict | None) -> tuple
     return overlap, base_arr, regime_arr
 
 
-def _regime_summary(q4: dict, q6: dict | None) -> dict:
-    """Per-regime stats: n_success, recomputed regressions (+ mismatch warnings), medians/IQRs."""
+def _regime_summary(q4: dict, q6: dict | None, *, universe: str = "fixed") -> dict:
+    """Per-regime stats: n_success, recomputed regressions (+ mismatch warnings), medians/IQRs.
+
+    `universe` is "fixed" (run on the baseline's fixed requested universe,
+    the historical default) or "native" (run on the market's own universe
+    for that period) — carried through to the regime table and the
+    law-stability table so the report distinguishes the two.
+    """
     records = q4["symbols"]
     recomputed = _recompute_q4_regressions(records)
     gamma_mismatch = _reg_mismatch(
@@ -442,6 +533,7 @@ def _regime_summary(q4: dict, q6: dict | None) -> dict:
 
     summary = {
         "period": q4.get("period"),
+        "universe": universe,
         "n_success": len(records),
         "n_skipped": q4.get("n_symbols_skipped"),
         "n_failed": q4.get("n_symbols_failed"),
@@ -508,6 +600,8 @@ def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) ->
         else None
     )
 
+    universe_by_label = {label: s["universe"] for label, s in all_summaries.items()}
+
     return {
         "flip_law_same_sign_all_regimes": same_sign,
         "flip_law_slope_by_label": {k: v for k, v in flip_slopes.items()},
@@ -515,6 +609,7 @@ def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) ->
         "gamma_invariant_all_regimes": gamma_invariant,
         "gamma_r2_by_label": gamma_r2_values,
         "gamma_flat_r2_threshold": GAMMA_FLAT_R2_THRESHOLD,
+        "universe_by_label": universe_by_label,
     }
 
 
@@ -644,9 +739,12 @@ def _write_md(
     baseline_summary: dict,
     regime_summaries: dict[str, dict],
     survivorship_by_label: dict[str, dict],
+    overlap_by_label: dict[str, dict],
     universe_accounting_by_label: dict[str, dict],
     rank_corr_by_label: dict[str, dict],
     law_stability: dict,
+    ordered_regime_labels: list[str],
+    native_regimes: set[str],
 ) -> None:
     lines: list[str] = []
     lines.append("# Q8: regime comparator — temporal robustness of the cross-sectional laws")
@@ -695,10 +793,10 @@ def _write_md(
     lines.append("## Regime table")
     lines.append("")
     lines.append(
-        "| regime | n_success | flip slope | flip R² | γ slope | γ R² | γ median (IQR) | "
+        "| regime | universe | n_success | flip slope | flip R² | γ slope | γ R² | γ median (IQR) | "
         "p_flip median | anti-persistent | α median (IQR) |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
 
     def _row(label: str, s: dict) -> str:
         flip = s["flip_law"]
@@ -715,17 +813,19 @@ def _write_md(
             f"{s['alpha_median']:.4f} ({s['alpha_iqr']:.4f})" if s["alpha_median"] is not None else "n/a"
         )
         return (
-            f"| {label} | {s['n_success']} | {flip_slope} | {flip_r2} | {gamma_slope} | "
+            f"| {label} | {s['universe']} | {s['n_success']} | {flip_slope} | {flip_r2} | {gamma_slope} | "
             f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} |"
         )
 
     lines.append(_row(baseline_label, baseline_summary))
-    for label, s in regime_summaries.items():
-        lines.append(_row(label, s))
+    for label in ordered_regime_labels:
+        lines.append(_row(label, regime_summaries[label]))
     lines.append("")
 
     warnings = []
-    for label, s in {"__baseline__": baseline_summary, **regime_summaries}.items():
+    ordered_labels_with_baseline = ["__baseline__", *ordered_regime_labels]
+    for label in ordered_labels_with_baseline:
+        s = baseline_summary if label == "__baseline__" else regime_summaries[label]
         display = baseline_label if label == "__baseline__" else label
         for key in ("flip_law_mismatch_warning", "gamma_law_mismatch_warning", "alpha_law_mismatch_warning"):
             w = s.get(key)
@@ -775,7 +875,10 @@ def _write_md(
     if ratios:
         lines.append("Flip-law slope ratio vs. baseline, per regime:")
         lines.append("")
-        for label, ratio in ratios.items():
+        for label in ordered_regime_labels:
+            if label not in ratios:
+                continue
+            ratio = ratios[label]
             lines.append(f"- {label}: {ratio:.4f}x baseline slope" if ratio is not None else f"- {label}: n/a")
         lines.append("")
 
@@ -801,6 +904,57 @@ def _write_md(
             "**not** hold uniformly across every regime examined here."
         )
     lines.append("")
+
+    for label in ordered_regime_labels:
+        if label not in native_regimes:
+            continue
+        display = label
+        flip_slope = law_stability["flip_law_slope_by_label"].get(label)
+        baseline_flip_slope = law_stability["flip_law_slope_by_label"].get("__baseline__")
+        gamma_r2 = law_stability["gamma_r2_by_label"].get(label)
+        lines.append(f"### Survivorship-free test: {display} (native universe)")
+        lines.append("")
+        lines.append(
+            f"**{display}** was run on the market's own requested universe for that period "
+            "rather than the baseline's fixed symbol list, so its flip-law and γ-vs-activity "
+            "verdicts below are **not confounded by survivorship** — the overlap comparison "
+            "(see the Overlap section) restricts to symbols present in both periods, and any "
+            "agreement or disagreement with the baseline law reflects the law itself, not "
+            "which symbols happened to still exist in the baseline's original panel."
+        )
+        lines.append("")
+        if flip_slope is None or baseline_flip_slope is None or baseline_flip_slope == 0.0:
+            lines.append(
+                f"- Flip-law slope for {display}: not evaluable against the baseline (one or "
+                "both slopes not estimable)."
+            )
+        elif np.sign(flip_slope) == np.sign(baseline_flip_slope):
+            lines.append(
+                f"- Flip-law slope for {display} ({flip_slope:.4f}) has the **same sign** as "
+                f"the baseline ({baseline_flip_slope:.4f}) — the flip law's direction survives "
+                "this survivorship-free test."
+            )
+        else:
+            lines.append(
+                f"- Flip-law slope for {display} ({flip_slope:.4f}) has the **opposite sign** "
+                f"from the baseline ({baseline_flip_slope:.4f}) — the flip law's direction does "
+                "**not** survive this survivorship-free test."
+            )
+        if gamma_r2 is None:
+            lines.append(f"- γ-vs-activity R² for {display}: not evaluable.")
+        elif gamma_r2 < GAMMA_FLAT_R2_THRESHOLD:
+            lines.append(
+                f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
+                f"{GAMMA_FLAT_R2_THRESHOLD:g} — γ remains flat (liquidity-invariant) in this "
+                "survivorship-free test."
+            )
+        else:
+            lines.append(
+                f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is at or above "
+                f"{GAMMA_FLAT_R2_THRESHOLD:g} — γ shows detectable activity dependence in this "
+                "survivorship-free test, i.e. the liquidity-invariance finding breaks down here."
+            )
+        lines.append("")
 
     above_threshold = [
         label for label, r2 in law_stability["gamma_r2_by_label"].items() if r2 >= GAMMA_FLAT_R2_THRESHOLD
@@ -839,53 +993,101 @@ def _write_md(
             )
             lines.append("")
 
-    lines.append("## Survivorship")
-    lines.append("")
-    for label, surv in survivorship_by_label.items():
+    if survivorship_by_label:
+        lines.append("## Survivorship")
+        lines.append("")
         lines.append(
-            f"**{label}**: {surv['n_survivors']}/{surv['n_baseline']} baseline symbols survive "
-            f"into this regime's successful set ({surv['n_regime']} symbols total in this "
-            f"regime). {len(surv['non_survivors'])} non-survivor(s)."
+            "Fixed-universe regimes only — a native-universe regime was run on its own "
+            "requested universe rather than the baseline's, so survivorship (which assumes a "
+            "shared requested universe) does not apply to it; see the Overlap section instead."
         )
         lines.append("")
-        if surv["non_survivors"]:
-            lines.append("| symbol | reason |")
-            lines.append("|---|---|")
-            for ns in surv["non_survivors"]:
-                lines.append(f"| {ns['symbol']} | {ns['reason']} |")
+        for label in ordered_regime_labels:
+            if label not in survivorship_by_label:
+                continue
+            surv = survivorship_by_label[label]
+            lines.append(
+                f"**{label}**: {surv['n_survivors']}/{surv['n_baseline']} baseline symbols survive "
+                f"into this regime's successful set ({surv['n_regime']} symbols total in this "
+                f"regime). {len(surv['non_survivors'])} non-survivor(s)."
+            )
             lines.append("")
+            if surv["non_survivors"]:
+                lines.append("| symbol | reason |")
+                lines.append("|---|---|")
+                for ns in surv["non_survivors"]:
+                    lines.append(f"| {ns['symbol']} | {ns['reason']} |")
+                lines.append("")
 
-    if universe_accounting_by_label:
-        lines.append("### Universe accounting (full requested universe, per regime)")
+    if overlap_by_label:
+        lines.append("## Overlap (native-universe regimes)")
         lines.append("")
         lines.append(
-            "The survivorship table above is relative to the baseline's *successful* symbol "
-            "set. The table below instead accounts for the **full requested universe** in "
-            "each regime (fixed to the baseline's symbol list) across three buckets: "
-            "successful (passed `min_events`), skipped (downloaded but below `min_events`), "
-            "and failed (no data to download at all for that period). These three buckets "
-            "always sum to the requested universe size by construction of the upstream Q4 run."
+            "For a regime run on the market's own native universe rather than the baseline's "
+            "fixed symbol list, survivorship does not apply (a symbol being absent from this "
+            "regime's universe may simply mean it did not exist yet, not that it disappeared). "
+            "Instead this reports the plain overlap between the baseline's successful symbol "
+            "set and this regime's own successful symbol set, plus Spearman rank correlation "
+            "on that overlap — the survivorship-free comparison."
+        )
+        lines.append("")
+        lines.append(
+            "| regime | n baseline | n regime | n overlap | baseline-only | regime-only | "
+            "p_flip Spearman ρ | γ Spearman ρ |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for label in ordered_regime_labels:
+            if label not in overlap_by_label:
+                continue
+            ov = overlap_by_label[label]
+            lines.append(
+                f"| {label} | {ov['n_baseline']} | {ov['n_regime']} | {ov['n_overlap']} | "
+                f"{ov['n_baseline_only']} | {ov['n_regime_only']} | "
+                f"{_fmt_corr(ov['p_flip_spearman'])} | {_fmt_corr(ov['gamma_spearman'])} |"
+            )
+        lines.append("")
+
+    if universe_accounting_by_label:
+        lines.append("### Universe accounting (own requested universe, per regime)")
+        lines.append("")
+        lines.append(
+            "Accounts for the **full requested universe of each regime** — the baseline's "
+            "fixed symbol list for a fixed-universe regime, or that regime's own market-native "
+            "universe for a native-universe one — across three buckets: successful (passed "
+            "`min_events`), skipped (downloaded but below `min_events`), and failed (no data "
+            "to download at all for that period). These three buckets always sum to **that "
+            "regime's own** requested universe size by construction of the upstream Q4 run — "
+            "for a native-universe regime this is its own total, not the baseline's."
         )
         lines.append("")
         lines.append("| regime | requested | successful | skipped (below floor) | failed (no data) | reconciles |")
         lines.append("|---|---|---|---|---|---|")
-        for label, ua in universe_accounting_by_label.items():
+        for label in ordered_regime_labels:
+            if label not in universe_accounting_by_label:
+                continue
+            ua = universe_accounting_by_label[label]
             lines.append(
                 f"| {label} | {ua['n_requested']} | {ua['n_successful']} | "
                 f"{ua['n_skipped_below_floor']} | {ua['n_failed_no_data']} | "
                 f"{'yes' if ua['reconciles'] else 'NO — see json'} |"
             )
         lines.append("")
-        for label, ua in universe_accounting_by_label.items():
+        for label in ordered_regime_labels:
+            ua = universe_accounting_by_label.get(label)
+            if ua is None:
+                continue
             if ua["download_missing_cross_check"] is not None:
                 lines.append(f"- **{label}** download-missing cross-check: {ua['download_missing_cross_check']}")
+            if ua["universe_mismatch_warning"] is not None:
+                lines.append(f"- **{label}** WARNING: {ua['universe_mismatch_warning']}")
         lines.append("")
 
     lines.append("## Symbol-level rank correlation")
     lines.append("")
     lines.append("| regime | n overlap | p_flip Spearman ρ | γ Spearman ρ | α overlap n | α Spearman ρ |")
     lines.append("|---|---|---|---|---|---|")
-    for label, rc in rank_corr_by_label.items():
+    for label in ordered_regime_labels:
+        rc = rank_corr_by_label[label]
         lines.append(
             f"| {label} | {rc['n_overlap']} | {_fmt_corr(rc['p_flip_spearman'])} | "
             f"{_fmt_corr(rc['gamma_spearman'])} | {rc['alpha_n_overlap']} | "
@@ -944,6 +1146,7 @@ def run_q8(
     regime_dirs: dict[str, Path],
     baseline_label: str = "2023-06",
     download_missing_paths: dict[str, Path] | None = None,
+    native_regimes: set[str] = frozenset(),
 ) -> dict:
     """Compare the Q4/Q6 cross-sectional laws between a baseline period and one or more regimes.
 
@@ -959,20 +1162,50 @@ def run_q8(
     This is purely a cross-check against the regime's own q4 `failures`
     list — the universe accounting itself is always computed from the q4
     json regardless of whether this is provided.
+
+    `native_regimes` is the set of labels (a subset of `regime_dirs`'s keys)
+    that were run against the market's OWN requested universe for that
+    period rather than the baseline's fixed symbol list (e.g. a later-year
+    regime run against that year's live listings instead of
+    `results/universe_2023-06.txt`). For a label in this set: the
+    survivorship block is replaced by an overlap block (baseline-vs-regime
+    symbol overlap + Spearman on the overlap, without the "baseline symbol
+    absent = non-survivor" framing that assumes a shared universe), and
+    universe accounting is computed against that regime's own
+    `n_symbols_requested` total (which need not, and generally will not,
+    equal the baseline's). Labels NOT in this set keep the exact prior
+    fixed-universe behavior, including a warning when their own
+    `n_symbols_requested` unexpectedly differs from the baseline's without
+    the native flag having been set (see `_universe_accounting`).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     baseline = _load_regime(baseline_dir)
     regimes = {label: _load_regime(path) for label, path in regime_dirs.items()}
     download_missing_paths = download_missing_paths or {}
+    native_regimes = set(native_regimes)
+    baseline_n_requested = baseline["q4"].get("n_symbols_requested")
 
-    baseline_summary = _regime_summary(baseline["q4"], baseline["q6"])
+    ordered_regime_labels = sorted(regime_dirs.keys(), key=_chrono_key)
+
+    baseline_summary = _regime_summary(baseline["q4"], baseline["q6"], universe="fixed")
     regime_summaries = {
-        label: _regime_summary(r["q4"], r["q6"]) for label, r in regimes.items()
+        label: _regime_summary(
+            r["q4"], r["q6"], universe="native" if label in native_regimes else "fixed"
+        )
+        for label, r in regimes.items()
     }
 
     survivorship_by_label = {
-        label: _survivorship(baseline["q4"], r["q4"]) for label, r in regimes.items()
+        label: _survivorship(baseline["q4"], r["q4"])
+        for label, r in regimes.items()
+        if label not in native_regimes
+    }
+
+    overlap_by_label = {
+        label: _overlap_comparison(baseline["q4"], r["q4"])
+        for label, r in regimes.items()
+        if label in native_regimes
     }
 
     universe_accounting_by_label = {
@@ -981,6 +1214,8 @@ def run_q8(
             _load_download_missing(download_missing_paths[label])
             if label in download_missing_paths
             else None,
+            is_native=label in native_regimes,
+            baseline_n_requested=baseline_n_requested,
         )
         for label, r in regimes.items()
     }
@@ -995,9 +1230,12 @@ def run_q8(
     result = {
         "baseline_label": baseline_label,
         "regime_labels": list(regime_dirs.keys()),
+        "regime_labels_ordered": ordered_regime_labels,
+        "native_regimes": sorted(native_regimes),
         "baseline_summary": baseline_summary,
         "regime_summaries": regime_summaries,
         "survivorship": survivorship_by_label,
+        "overlap": overlap_by_label,
         "universe_accounting": universe_accounting_by_label,
         "rank_correlations": rank_corr_by_label,
         "law_stability": law_stability,
@@ -1010,9 +1248,12 @@ def run_q8(
         baseline_summary,
         regime_summaries,
         survivorship_by_label,
+        overlap_by_label,
         universe_accounting_by_label,
         rank_corr_by_label,
         law_stability,
+        ordered_regime_labels,
+        native_regimes,
     )
     (out_dir / "q8_regimes.json").write_text(json.dumps(result, indent=2))
     return result
@@ -1040,6 +1281,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "regime's period, as LABEL=FILE (one symbol per line); repeatable"
         ),
     )
+    parser.add_argument(
+        "--native",
+        action="append",
+        default=[],
+        metavar="LABEL",
+        help=(
+            "mark a --regime LABEL as run on the market's own native universe for that "
+            "period rather than the baseline's fixed symbol list; repeatable"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1061,4 +1312,5 @@ if __name__ == "__main__":
         regime_dirs=_parse_label_path_args(args.regime, "--regime"),
         baseline_label=args.baseline_label,
         download_missing_paths=_parse_label_path_args(args.download_missing, "--download-missing"),
+        native_regimes=set(args.native),
     )

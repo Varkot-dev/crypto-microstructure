@@ -465,3 +465,166 @@ def test_run_q8_single_regime_no_q6_either_side(tmp_path: Path):
     rc = result["rank_correlations"]["2023-07"]
     assert rc["alpha_spearman"] is None
     assert rc["alpha_n_overlap"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Native-universe regimes (Task 4b): overlap semantics, own-universe
+# accounting, chronological ordering, and mismatch-without-flag warning.
+# ---------------------------------------------------------------------------
+
+# Native regime's own universe is disjoint-but-overlapping with baseline:
+# baseline has SYM0..SYM9; the native regime's universe adds NEWSYM0/1 (new
+# listings, never in baseline) and drops SYM8/SYM9 (delisted by then), for a
+# partial overlap of 8 symbols on the baseline side and 10 on the native
+# regime's own side.
+NATIVE_OVERLAP_SYMBOLS = SYMBOLS[:8]
+NATIVE_NEW_SYMBOLS = ["NEWSYM0USDT", "NEWSYM1USDT", "NEWSYM2USDT"]
+NATIVE_N_EVENTS = {
+    **{sym: N_EVENTS[sym] for sym in NATIVE_OVERLAP_SYMBOLS},
+    "NEWSYM0USDT": N_EVENTS_BASE * 11,
+    "NEWSYM1USDT": N_EVENTS_BASE * 12,
+    "NEWSYM2USDT": N_EVENTS_BASE * 13,
+}
+
+
+def _native_regime_records(flip_slope: float, flip_intercept: float) -> list[dict]:
+    records = []
+    for sym in NATIVE_OVERLAP_SYMBOLS:
+        log_n = LOG_N[sym]
+        records.append(_q4_record(sym, N_EVENTS[sym], gamma=GAMMA_BASE, p_flip=flip_intercept + flip_slope * log_n))
+    for sym in NATIVE_NEW_SYMBOLS:
+        log_n = np.log10(NATIVE_N_EVENTS[sym])
+        records.append(_q4_record(sym, NATIVE_N_EVENTS[sym], gamma=GAMMA_BASE, p_flip=flip_intercept + flip_slope * log_n))
+    return records
+
+
+def test_run_q8_native_regime_reports_overlap_not_survivorship(tmp_path: Path):
+    baseline_dir = tmp_path / "baseline"
+    native_dir = tmp_path / "native"
+    _write_q4_json(baseline_dir, "2023-06", _baseline_records())
+    native_records = _native_regime_records(flip_slope=0.05, flip_intercept=0.3)
+    _write_q4_json(native_dir, "2026-07", native_records)
+
+    out_dir = tmp_path / "results"
+    result = run_q8(
+        out_dir,
+        baseline_dir=baseline_dir,
+        regime_dirs={"2026-07": native_dir},
+        baseline_label="2023-06",
+        native_regimes={"2026-07"},
+    )
+
+    # No survivorship block at all for a native regime.
+    assert "2026-07" not in result["survivorship"]
+
+    overlap = result["overlap"]["2026-07"]
+    assert overlap["n_overlap"] == len(NATIVE_OVERLAP_SYMBOLS)
+    assert overlap["n_baseline_only"] == 10 - len(NATIVE_OVERLAP_SYMBOLS)
+    assert overlap["n_regime_only"] == len(NATIVE_NEW_SYMBOLS)
+    assert overlap["p_flip_spearman"] is not None
+
+    # Universe accounting reports the regime's OWN requested total, not 207
+    # (nor the baseline's 10) — it must sum to itself.
+    ua = result["universe_accounting"]["2026-07"]
+    assert ua["n_requested"] == len(native_records)
+    assert ua["n_successful"] + ua["n_skipped_below_floor"] + ua["n_failed_no_data"] == ua["n_requested"]
+
+    # Regime table / json marks this regime as native-universe.
+    assert result["regime_summaries"]["2026-07"]["universe"] == "native"
+    assert result["baseline_summary"]["universe"] == "fixed"
+
+    md_text = (out_dir / "q8_regimes.md").read_text()
+    assert "native universe" in md_text.lower()
+
+
+def test_run_q8_native_regime_law_stability_verdict_is_survivorship_free(tmp_path: Path):
+    """The flip-law/gamma verdict on a native regime is phrased as the survivorship-free test."""
+    baseline_dir = tmp_path / "baseline"
+    native_dir = tmp_path / "native"
+    _write_q4_json(baseline_dir, "2023-06", _baseline_records())
+    _write_q4_json(native_dir, "2026-07", _native_regime_records(flip_slope=0.05, flip_intercept=0.3))
+
+    out_dir = tmp_path / "results"
+    run_q8(
+        out_dir,
+        baseline_dir=baseline_dir,
+        regime_dirs={"2026-07": native_dir},
+        baseline_label="2023-06",
+        native_regimes={"2026-07"},
+    )
+
+    md_text = (out_dir / "q8_regimes.md").read_text()
+    assert "survivorship-free" in md_text.lower()
+    # Law-stability table carries a "universe" column with fixed/native values.
+    assert "universe" in md_text.lower()
+
+
+def test_run_q8_non_native_regime_unaffected_by_native_flag_absence(three_regime_dirs: dict, tmp_path: Path):
+    """Existing (non-native) regimes keep exact prior behavior when native_regimes is empty."""
+    out_dir = tmp_path / "results"
+    result = run_q8(
+        out_dir,
+        baseline_dir=three_regime_dirs["baseline_dir"],
+        regime_dirs=three_regime_dirs["regime_dirs"],
+        baseline_label="2023-06",
+    )
+    # Survivorship block present for every regime; no "overlap" block at all.
+    assert set(result["survivorship"].keys()) == {"2023-07", "2024-07", "2026-07"}
+    assert result.get("overlap", {}) == {}
+    for label, s in result["regime_summaries"].items():
+        assert s["universe"] == "fixed"
+
+
+def test_run_q8_universe_mismatch_without_native_flag_warns(tmp_path: Path):
+    """A regime whose q4 n_symbols_requested differs from baseline's, without the native
+    flag, must emit a warning in the json rather than silently compute survivorship."""
+    baseline_dir = tmp_path / "baseline"
+    mismatched_dir = tmp_path / "mismatched"
+    _write_q4_json(baseline_dir, "2023-06", _baseline_records())
+    # Same overlap-style records as the native fixture (12 requested vs.
+    # baseline's 10) but WITHOUT passing native_regimes.
+    _write_q4_json(mismatched_dir, "2024-07", _native_regime_records(flip_slope=0.05, flip_intercept=0.3))
+
+    out_dir = tmp_path / "results"
+    result = run_q8(
+        out_dir,
+        baseline_dir=baseline_dir,
+        regime_dirs={"2024-07": mismatched_dir},
+        baseline_label="2023-06",
+    )
+
+    ua = result["universe_accounting"]["2024-07"]
+    assert ua["universe_mismatch_warning"] is not None
+    assert "universe mismatch without native flag" in ua["universe_mismatch_warning"]
+    # Survivorship is still computed (non-native path unchanged) despite the warning.
+    assert "2024-07" in result["survivorship"]
+
+
+def test_run_q8_regimes_rendered_in_chronological_order(tmp_path: Path):
+    """Regimes render baseline-first, then chronological YYYY-MM label order,
+    regardless of the insertion order of `regime_dirs`."""
+    baseline_dir = tmp_path / "baseline"
+    dir_2026 = tmp_path / "r2026"
+    dir_2024 = tmp_path / "r2024"
+    dir_2025 = tmp_path / "r2025"
+    _write_q4_json(baseline_dir, "2023-06", _baseline_records())
+    _write_q4_json(dir_2026, "2026-07", _regime_records(0.05, 0.3, SYMBOLS))
+    _write_q4_json(dir_2024, "2024-07", _regime_records(0.05, 0.3, SYMBOLS))
+    _write_q4_json(dir_2025, "2025-07", _regime_records(0.05, 0.3, SYMBOLS))
+
+    out_dir = tmp_path / "results"
+    result = run_q8(
+        out_dir,
+        baseline_dir=baseline_dir,
+        # Deliberately out-of-order insertion: 2026, 2024, 2025.
+        regime_dirs={"2026-07": dir_2026, "2024-07": dir_2024, "2025-07": dir_2025},
+        baseline_label="2023-06",
+    )
+    assert result["regime_labels_ordered"] == ["2024-07", "2025-07", "2026-07"]
+
+    md_text = (out_dir / "q8_regimes.md").read_text()
+    i_baseline = md_text.index("2023-06")
+    i_2024 = md_text.index("2024-07")
+    i_2025 = md_text.index("2025-07")
+    i_2026 = md_text.index("2026-07")
+    assert i_baseline < i_2024 < i_2025 < i_2026

@@ -46,7 +46,11 @@ from microstructure.analyses.q6b_kernel_sensitivity import (
     run_q6b,
 )
 from microstructure.data.catalog import parquet_path
-from microstructure.estimators.hawkes import simulate_hawkes_exp, simulate_hawkes_multiexp
+from microstructure.estimators.hawkes import (
+    simulate_hawkes_exp,
+    simulate_hawkes_multiexp,
+    spurious_delta21_null,
+)
 
 WINDOWS = 2
 KS = (1, 2)
@@ -65,16 +69,45 @@ TWOEXP_N_TRUE = float(TWOEXP_ALPHAS.sum())  # 0.6
 TWOEXP_T_END = 24_000.0
 
 # Single-exponential planted kernel: true n = 0.4, well-specified at K=1 --
-# the negative control. t_end tuned so this also lands in the ~35-45k event
-# range at mu=1.0, beta=2.0 (matches the scale test_hawkes.py and
-# test_q6.py's own single-exponential fixtures use).
+# the negative control. t_end tuned to land at ~60k events (mu=1.0, beta=2.0,
+# matching the scale test_hawkes.py and test_q6.py's own single-exponential
+# fixtures use), NOT the ~35-45k range the other planted fixtures use.
+#
+# WHY 60k AND NOT A LOOSER TOLERANCE (see `spurious_delta21_null`'s docstring
+# in src/microstructure/estimators/hawkes.py for the full mechanism): the K=2
+# fit has two more free parameters than K=1 and can always fit finite sample
+# noise at least as well, so n_hat_2 carries an intrinsic upward finite-
+# sample bias over n_hat_1 even when the true kernel really is K=1 -- this is
+# NOT a local-optimum artifact of the multi-start search (measured directly:
+# widening `betas_init` away from the default did not remove it on the
+# window that showed the bias). The bias SHRINKS with sample size. At the
+# fixture's old size (t_end=20_000 -> ~33k events -> ~16.6k/window at
+# windows=2), Delta21 measured 0.107 at seed=7 -- above the old 0.08
+# tolerance not because the estimator is broken, but because ~16.6k
+# events/window is small enough for the K=2 fit's extra flexibility to
+# meaningfully overfit sampling noise (one window's K=2 fit converged to
+# betas=(0.021, 0.479) with a genuine ~11-nat log-likelihood improvement
+# over K=1, despite the generative process having no second timescale at
+# all). Raising to t_end=36_000 (-> ~59.5k events -> ~29.8k/window at
+# seed=7) measured Delta21=0.0079 -- both because the estimator is less
+# biased at this size (see the null below) and to give the fixture more
+# margin over a moving null floor. This is a FIDELITY fix (more data makes
+# the well-specified K=1 truth easier to recover), not a loosened tolerance.
 ONEEXP_MU, ONEEXP_BETA = 1.0, 2.0
 ONEEXP_ALPHA = 0.4
-ONEEXP_T_END = 20_000.0
+ONEEXP_T_END = 36_000.0
 
 DELTA21_TOL_TWOEXP = 0.15  # Delta21 must exceed this on the two-timescale symbol
 N2_TOL_TWOEXP = 0.1  # n_hat_2 must land within this of the true n=0.6
-DELTA21_TOL_ONEEXP = 0.08  # |Delta21| must stay below this on the single-exp symbol
+
+# Slack added on top of the null median when judging the single-exp negative
+# control's observed Delta21 (see test_run_q6b_single_exp_symbol_shows_small_delta21).
+# n_sims=2 here (vs. spurious_delta21_null's own unit test's n_sims=3) keeps
+# this inline null computation cheap -- it is recomputed on every test run,
+# not once -- while still giving a real (if noisy) estimate of the null
+# median at this fixture's actual per-window event count.
+DELTA21_NULL_SIMS = 2
+DELTA21_NULL_SLACK = 0.05
 
 
 def _write_event_times_fixture(
@@ -139,7 +172,7 @@ def test_run_q6b_two_timescale_symbol_shows_large_delta21(planted_root: Path):
     out_dir = planted_root / "results_two"
     result = run_q6b(
         planted_root, out_dir, symbols=["TWOEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     assert result["n_symbols_successful"] == 1, result["failures"]
     rec = result["records"][0]
@@ -156,19 +189,65 @@ def test_run_q6b_two_timescale_symbol_shows_large_delta21(planted_root: Path):
 
 
 def test_run_q6b_single_exp_symbol_shows_small_delta21(planted_root: Path):
+    """The negative control: a well-specified K=1 symbol's observed Delta21
+    must not exceed the finite-sample null (see `spurious_delta21_null`'s
+    docstring) computed at this run's own median per-window event count,
+    plus a fixed slack. This replaces a bare tolerance constant because the
+    K=2 fit has an intrinsic upward finite-sample bias over K=1 even when
+    K=1 is exactly correct (more free parameters can only help in-sample
+    likelihood) -- judging Delta21 against a fixed number chosen without
+    reference to sample size conflates "the estimator is biased at this
+    sample size" with "there is a genuine second timescale". The null is
+    recomputed inline (n_sims=2, ~10-15s) rather than hardcoded, since it
+    depends on this fixture's own (mu, alpha, beta) and event count.
+
+    This test also exercises `run_q6b`'s own `null_floor_p90`/
+    `within_finite_sample_null` wiring (step 4 of the Q6b hardening: the
+    panel-level null floor reported in the JSON/md) via the SAME `run_q6b`
+    call (`null_sims=DELTA21_NULL_SIMS`), rather than a second dedicated
+    call, so this stays the only place in the suite paying for the run-level
+    null calibration on top of the fixture's own pipeline run.
+    """
     out_dir = planted_root / "results_one"
     result = run_q6b(
         planted_root, out_dir, symbols=["ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=DELTA21_NULL_SIMS,
     )
     assert result["n_symbols_successful"] == 1, result["failures"]
     rec = result["records"][0]
 
-    assert abs(rec["delta21"]) < DELTA21_TOL_ONEEXP, (
-        f"expected |Delta21| < {DELTA21_TOL_ONEEXP} on the well-specified K=1 symbol, "
-        f"got {rec['delta21']} (n_hat_1={rec['n_median_by_k'].get(1)}, "
-        f"n_hat_2={rec['n_median_by_k'].get(2)})"
+    n_events_per_window = rec["n_events"] // WINDOWS
+    null = spurious_delta21_null(
+        n_events_per_window, mu=ONEEXP_MU, alpha=ONEEXP_ALPHA, beta=ONEEXP_BETA,
+        n_sims=DELTA21_NULL_SIMS, seed=999,
     )
+    null_floor = float(np.median(null)) + DELTA21_NULL_SLACK
+
+    assert abs(rec["delta21"]) <= null_floor, (
+        f"expected |Delta21| <= null_floor={null_floor:.4f} "
+        f"(null median={np.median(null):.4f} + slack={DELTA21_NULL_SLACK}, "
+        f"null={null.tolist()}, n_events_per_window={n_events_per_window}) "
+        f"on the well-specified K=1 symbol, got {rec['delta21']} "
+        f"(n_hat_1={rec['n_median_by_k'].get(1)}, n_hat_2={rec['n_median_by_k'].get(2)})"
+    )
+
+    # run_q6b's own panel-level null floor (step 4): computed once at the
+    # panel's median per-window event count via _null_floor_p90, exposed in
+    # cross_section and used to label each record within_finite_sample_null.
+    # NOTE: only the wiring is asserted here, not a specific True/False value
+    # -- null_sims=DELTA21_NULL_SIMS (2) makes _null_floor_p90's own p90 a
+    # noisy quantity from run to run, so asserting a specific label would be
+    # exactly the kind of n_sims=2-noise-driven brittleness this test's
+    # primary assertion (Delta21 <= median(null) + slack, above) was written
+    # to avoid. The scientific claim ("this symbol's Delta21 is small") is
+    # already checked by that primary assertion; this block only checks the
+    # field is populated and well-typed.
+    null_floor_p90 = result["cross_section"]["null_floor_p90"]
+    assert null_floor_p90 is not None
+    assert null_floor_p90["n_sims"] == DELTA21_NULL_SIMS
+    assert null_floor_p90["p90"] >= null_floor_p90["median"]
+    assert "within_finite_sample_null" in rec
+    assert isinstance(rec["within_finite_sample_null"], bool)
 
 
 def test_run_q6b_missing_symbol_lands_in_failures(planted_root: Path):
@@ -176,7 +255,7 @@ def test_run_q6b_missing_symbol_lands_in_failures(planted_root: Path):
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "MISSINGUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     by_symbol = {r["symbol"]: r for r in result["records"]}
     assert "TWOEXPUSDT" in by_symbol
@@ -193,7 +272,7 @@ def test_run_q6b_never_aborts_on_all_failures(tmp_path: Path):
     out_dir = tmp_path / "results"
     result = run_q6b(
         tmp_path, out_dir, symbols=["GHOSTUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     assert result["records"] == []
     assert len(result["failures"]) == 1
@@ -209,7 +288,7 @@ def test_run_q6b_outputs_exist_and_parquet_row_count_matches_successes(planted_r
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT", "MISSINGUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     assert (out_dir / "q6b_kernel_sensitivity.json").exists()
     assert (out_dir / "q6b_kernel_sensitivity.md").exists()
@@ -243,7 +322,7 @@ def test_run_q6b_cross_section_reports_delta21_distribution_and_frac_near_critic
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     cross = result["cross_section"]
     assert cross["delta21_distribution"] is not None
@@ -272,7 +351,7 @@ def test_run_q6b_correlates_delta21_with_q6_count_variance_gap(planted_root: Pat
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, q6_json=q6_json_path,
+        windows=WINDOWS, ks=KS, q6_json=q6_json_path, null_sims=0,
     )
     cv_corr = result["cross_section"]["cv_gap_correlation"]
     assert cv_corr is not None
@@ -283,7 +362,7 @@ def test_run_q6b_correlates_delta21_with_q6_count_variance_gap(planted_root: Pat
     result_no_q6 = run_q6b(
         planted_root, out_dir_no_q6,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS,
+        windows=WINDOWS, ks=KS, null_sims=0,
     )
     assert result_no_q6["cross_section"]["cv_gap_correlation"] is None
     assert result_no_q6["q6_json_used"] is None

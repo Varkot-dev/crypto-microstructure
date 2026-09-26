@@ -69,7 +69,7 @@ import numpy as np
 import polars as pl
 
 from microstructure.data.catalog import parquet_path
-from microstructure.estimators.hawkes import fit_hawkes_multiexp
+from microstructure.estimators.hawkes import fit_hawkes_multiexp, spurious_delta21_null
 from microstructure.signals.eventtime import intraday_rate_profile, rescale_to_business_time
 from microstructure.signals.load import load_events
 
@@ -210,6 +210,7 @@ def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[
 
     window_fits = _fit_business_time_windows(bt, windows, ks)
     window_length_s = float(np.median([w["window_length_s"] for w in window_fits]))
+    n_events_per_window = int(bt.size // windows)
 
     n_hat_by_k: dict[int, list[float]] = {k: [] for k in ks}
     converged_by_k: dict[int, list[bool]] = {k: [] for k in ks}
@@ -248,6 +249,7 @@ def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[
     return {
         "symbol": symbol,
         "n_events": n_events,
+        "n_events_per_window": n_events_per_window,
         "windows": windows,
         "ks": list(ks),
         "n_median_by_k": n_median_by_k,
@@ -292,12 +294,73 @@ def _load_q6_gap(q6_json: Path | None) -> dict[str, float]:
     return gaps
 
 
-def _cross_section(records: list[dict], q6_gaps: dict[str, float]) -> dict:
+def _null_floor_p90(records: list[dict], null_sims: int, seed: int = 20240601) -> dict | None:
+    """Finite-sample Delta21 null floor, calibrated at the panel's own median
+    per-window event count (see `spurious_delta21_null`'s docstring for why
+    this must be calibrated at the run's actual event count, not a fixed
+    size). Representative single-exp parameters for the null simulation are
+    taken FROM the panel itself, not hardcoded: `alpha` is the panel's median
+    K=1 branching ratio (n_hat_k1) -- the panel's own typical "how much
+    branching does a K=1 fit see" answer -- and `beta=2.0`, the same
+    single-exponential decay rate this repo's own planted single-exp
+    fixtures use throughout (test_hawkes.py, test_q6.py, test_q6b.py's
+    ONEEXPUSDT), as a reasonable representative timescale absent any
+    panel-wide way to estimate a "typical" beta from K=1 fits alone (K=1
+    beta is only loosely identified per `fit_hawkes_exp`'s own docstring).
+    `mu` is not a free choice here: `spurious_delta21_null` derives its own
+    `t_end` from `n_events_per_window` and the stationary mean-rate identity
+    `mu/(1-alpha)`, so only `alpha` and `beta` need to be supplied.
+
+    Returns None if `null_sims <= 0` (an explicit opt-out for callers that
+    do not need this diagnostic and want to skip its runtime cost -- e.g.
+    tests exercising unrelated parts of the pipeline) or if no successful
+    records have both K=1 fits and a recorded per-window event count
+    (nothing to calibrate against).
+    """
+    if null_sims <= 0:
+        return None
+
+    per_window_counts = [
+        r["n_events_per_window"] for r in records if r.get("n_events_per_window", 0) > 0
+    ]
+    alphas_k1 = [r["n_median_by_k"][1] for r in records if 1 in r["n_median_by_k"]]
+    if not per_window_counts or not alphas_k1:
+        return None
+
+    n_events_per_window = int(np.median(per_window_counts))
+    alpha = float(np.median(alphas_k1))
+    beta = 2.0
+
+    # Guard the same alpha<1 stationarity constraint spurious_delta21_null's
+    # underlying simulator enforces -- a panel-wide median alpha at or above
+    # 1 would itself be a red flag (near-critical/explosive panel), and the
+    # null is not meaningful there.
+    if not (0.0 < alpha < 1.0) or n_events_per_window <= 0:
+        return None
+
+    null = spurious_delta21_null(
+        n_events_per_window, mu=1.0, alpha=alpha, beta=beta, n_sims=null_sims, seed=seed
+    )
+    return {
+        "n_events_per_window": n_events_per_window,
+        "alpha_used": alpha,
+        "beta_used": beta,
+        "n_sims": null_sims,
+        "p90": float(np.percentile(null, 90)),
+        "median": float(np.median(null)),
+        "values": [float(v) for v in null],
+    }
+
+
+def _cross_section(
+    records: list[dict], q6_gaps: dict[str, float], null_sims: int = 5
+) -> dict:
     if not records:
         return {
             "delta21_distribution": None,
             "frac_n2_at_least_0_9": None,
             "cv_gap_correlation": None,
+            "null_floor_p90": None,
         }
 
     delta21s = np.array([r["delta21"] for r in records if np.isfinite(r["delta21"])])
@@ -337,10 +400,13 @@ def _cross_section(records: list[dict], q6_gaps: dict[str, float]) -> dict:
             else:
                 cv_gap_correlation = {"correlation": None, "n": len(paired)}
 
+    null_floor_p90 = _null_floor_p90(records, null_sims)
+
     return {
         "delta21_distribution": delta21_distribution,
         "frac_n2_at_least_0_9": frac_n2_at_least_0_9,
         "cv_gap_correlation": cv_gap_correlation,
+        "null_floor_p90": null_floor_p90,
     }
 
 
@@ -352,6 +418,7 @@ def run_q6b(
     windows: int = 6,
     ks: tuple[int, ...] = DEFAULT_KS,
     q6_json: Path | None = None,
+    null_sims: int = 5,
 ) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
@@ -368,7 +435,24 @@ def run_q6b(
             failures.append({"symbol": symbol, "reason": f"{type(e).__name__}: {e}"})
 
     q6_gaps = _load_q6_gap(q6_json)
-    cross_section = _cross_section(records, q6_gaps)
+    cross_section = _cross_section(records, q6_gaps, null_sims)
+
+    null_floor_p90 = cross_section.get("null_floor_p90")
+    if null_floor_p90 is not None:
+        p90 = null_floor_p90["p90"]
+        for r in records:
+            # "within finite-sample null": this symbol's Delta21 does not
+            # exceed the panel's own null 90th percentile (see
+            # `_null_floor_p90`'s docstring) -- i.e. it is no more than what
+            # a well-specified K=1 process of the panel's typical per-window
+            # size would produce anyway, and should not be read as evidence
+            # of genuine long-memory kernel structure on its own.
+            r["within_finite_sample_null"] = bool(
+                np.isfinite(r["delta21"]) and r["delta21"] <= p90
+            )
+    else:
+        for r in records:
+            r["within_finite_sample_null"] = None
 
     result = {
         "month": month,
@@ -565,9 +649,9 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
         lines.append("")
         lines.append(
             "| symbol | n_events | n̂_1 | n̂_2 | n̂_3 | Δ21 | 1/β_slow (K=2, s) | "
-            "÷ bin width | ÷ window length | drift-suspect |"
+            "÷ bin width | ÷ window length | drift-suspect | within null |"
         )
-        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
         for r in sorted_records:
             n1 = r["n_median_by_k"].get(1)
             n2 = r["n_median_by_k"].get(2)
@@ -575,12 +659,14 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
             n1s = f"{n1:.4f}" if n1 is not None else "n/a"
             n2s = f"{n2:.4f}" if n2 is not None else "n/a"
             n3s = f"{n3:.4f}" if n3 is not None else "n/a"
+            within_null = r.get("within_finite_sample_null")
+            within_null_s = "yes" if within_null else ("NO" if within_null is False else "n/a")
             lines.append(
                 f"| {r['symbol']} | {r['n_events']:,} | {n1s} | {n2s} | {n3s} | "
                 f"{r['delta21']:+.4f} | {r['median_inv_beta_slow_k2_s']:.2f} | "
                 f"{_fmt_ratio(r['ratio_inv_beta_slow_to_bin_width'])} | "
                 f"{_fmt_ratio(r['ratio_inv_beta_slow_to_window_length'])} | "
-                f"{'YES' if r['drift_suspect'] else 'no'} |"
+                f"{'YES' if r['drift_suspect'] else 'no'} | {within_null_s} |"
             )
         lines.append("")
     else:
@@ -599,6 +685,31 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
     else:
         lines.append("Δ21 distribution not estimable (no successful symbols with both K=1, K=2).")
     lines.append("")
+
+    null_floor = cross_section.get("null_floor_p90")
+    if null_floor is not None:
+        n_within = sum(1 for r in records if r.get("within_finite_sample_null"))
+        lines.append(
+            f"**Δ21 is reported alongside a null floor computed at the panel's per-window "
+            f"event count** ({null_floor['n_events_per_window']:,} events, from "
+            f"{null_floor['n_sims']} simulated well-specified K=1 processes with "
+            f"alpha={null_floor['alpha_used']:.4f} (this panel's own median n̂_1), "
+            f"beta={null_floor['beta_used']:.1f} — see `spurious_delta21_null`). The null's "
+            f"90th percentile is **{null_floor['p90']:.4f}** (median {null_floor['median']:.4f}). "
+            f"Symbols whose Δ21 does not exceed this null's 90th percentile are labeled "
+            f"**\"within finite-sample null\"** in the panel table above ({n_within}/"
+            f"{len(records)} symbols here) — their Δ21 is no larger than what a well-"
+            "specified, non-long-memory K=1 process of this panel's typical per-window size "
+            "would produce from sampling noise alone, so it should not be read as evidence "
+            "of genuine long-memory kernel structure on its own."
+        )
+    else:
+        lines.append(
+            "Null floor not estimable (no successful symbols with a K=1 fit and recorded "
+            "per-window event count)."
+        )
+    lines.append("")
+
     frac = cross_section["frac_n2_at_least_0_9"]
     if frac is not None:
         lines.append(
@@ -708,6 +819,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--q6-json", type=Path, default=None,
         help="path to a Q6 results JSON, for the Δ21-vs-count-variance-gap correlation",
     )
+    parser.add_argument(
+        "--null-sims", type=int, default=5,
+        help=(
+            "number of simulations for the finite-sample Delta21 null floor "
+            "(spurious_delta21_null), calibrated at the panel's median per-window "
+            "event count; default 5, tests use fewer to stay inside their runtime budget"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -722,4 +841,5 @@ if __name__ == "__main__":
     run_q6b(
         args.root, args.out, symbols=symbols, month=args.month,
         windows=args.windows, ks=_parse_ks(args.ks), q6_json=args.q6_json,
+        null_sims=args.null_sims,
     )

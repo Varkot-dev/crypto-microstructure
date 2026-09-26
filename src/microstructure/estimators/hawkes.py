@@ -925,6 +925,89 @@ def branching_ratio_sensitivity(
     return {K: fit_hawkes_multiexp(times, t_end, K) for K in Ks}
 
 
+def spurious_delta21_null(
+    n_events_per_window: int, mu: float, alpha: float, beta: float, n_sims: int, seed: int
+) -> np.ndarray:
+    """Null distribution of Delta21 = n_hat_2 - n_hat_1 under a TRUE single-exp kernel.
+
+    WHY THIS EXISTS: `fit_hawkes_multiexp` at K=2 has two more free parameters
+    than the K=1 fit and can never do worse in-sample log-likelihood -- on
+    FINITE data it will generally do strictly better, by using its extra
+    component to absorb ordinary sampling noise in the event-time gaps
+    rather than any real second timescale. Concretely (see the investigation
+    behind this function, reproduced against `tests/analyses/test_q6b.py`'s
+    ONEEXPUSDT fixture: mu=1.0, alpha=0.4, beta=2.0, seed=7, business-time
+    windows of ~16.6k events each), a K=2 fit on one such window converged to
+    betas=(0.021, 0.479) with a genuine log-likelihood improvement of
+    ~11 nats over K=1 for 2 extra parameters -- a real gain by naive
+    likelihood-ratio standards, yet the generative process has no second
+    timescale at all. The "slow" component is not a local-optimum fluke in
+    general (a wider `betas_init` search can still land on it); it is the
+    K=2 model's extra flexibility fitting sampling noise in a finite sample.
+    This means `n_hat_2` carries an intrinsic upward finite-sample bias
+    relative to `n_hat_1` even when K=1 is exactly correct, and Delta21 must
+    be judged against the SIZE of that bias at the relevant sample size, not
+    against a fixed tolerance chosen without reference to it.
+
+    This function simulates `n_sims` independent single-exponential Hawkes
+    processes with the given (mu, alpha, beta), each sized (via `t_end`) to
+    land close to `n_events_per_window` events, fits both K=1 and K=2 via
+    `fit_hawkes_multiexp` on each, and returns the array of per-simulation
+    Delta21 = n_hat_2 - n_hat_1. This is the null distribution a real
+    symbol's observed Delta21 should be compared against: a real Delta21
+    that does not exceed (e.g.) this null's 90th percentile is "within
+    finite-sample null" -- i.e. no more than what a well-specified K=1
+    process of the same sample size would produce anyway -- rather than
+    evidence of genuine long-memory kernel structure.
+
+    THE BIAS SHRINKS WITH SAMPLE SIZE, AND MUST BE CALIBRATED AT THE PANEL'S
+    ACTUAL PER-WINDOW EVENT COUNT: more events per window pin down the K=1
+    fit's residual gaps more tightly, leaving less unexplained noise for a
+    second component to absorb, so the median null Delta21 falls as
+    `n_events_per_window` grows (measured: median null Delta21 ~0.003-0.02 at
+    ~10k events per window vs. a few times smaller at ~40k, over independent
+    seeds -- exact values are noisy with only a handful of simulations, which
+    is why `n_sims` should be large enough for a stable percentile in
+    production use). Since Q6b caps any single window's fit at
+    `MAX_FIT_EVENTS=250_000` events, the null must be simulated at the
+    PANEL's actual median per-window event count (post-cap), not at an
+    arbitrary or worst-case size -- calibrating at a smaller size than the
+    real windows overstates the null (too permissive would be the opposite
+    error: calibrating at a larger size understates it and makes genuine
+    long-memory harder to detect).
+
+    `t_end` per simulation is derived from `n_events_per_window` via the
+    exponential-kernel process's theoretical mean rate
+    `mu / (1 - alpha)` events per unit time (exact for a stationary Hawkes
+    process: each immigrant plus its full branching-process descendant tree
+    contributes `1/(1-alpha)` events in expectation), so the realized event
+    count lands close to (not exactly at, since simulation is stochastic)
+    the requested size.
+    """
+    if n_events_per_window <= 0:
+        raise ValueError("n_events_per_window must be positive")
+    if n_sims <= 0:
+        raise ValueError("n_sims must be positive")
+
+    mean_rate = mu / (1.0 - alpha)
+    t_end = n_events_per_window / mean_rate
+
+    rng = np.random.default_rng(seed)
+    # Draw independent per-simulation seeds from this function's own seed so
+    # callers get reproducible, non-correlated draws without exposing an
+    # array of seeds in the signature.
+    sim_seeds = rng.integers(0, 2**32 - 1, size=n_sims)
+
+    deltas = np.empty(n_sims, dtype=np.float64)
+    for i, sim_seed in enumerate(sim_seeds):
+        times = simulate_hawkes_exp(mu, alpha, beta, t_end, seed=int(sim_seed))
+        fit1 = fit_hawkes_multiexp(times, float(times[-1]), K=1)
+        fit2 = fit_hawkes_multiexp(times, float(times[-1]), K=2)
+        deltas[i] = fit2.n - fit1.n
+
+    return deltas
+
+
 # ---------------------------------------------------------------------------
 # Model-free branching-ratio estimator (Hardiman & Bouchaud 2014).
 # ---------------------------------------------------------------------------

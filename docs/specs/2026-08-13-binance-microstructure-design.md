@@ -5,7 +5,7 @@ Status: draft for user review
 
 ## 1. What this is
 
-An empirical research project measuring price impact and order-flow dynamics on Binance from raw tick data. Learning-first: every Phase-1 result has a published benchmark to check against. Phase 2 carries the same machinery to a genuinely unoccupied spot (verified adversarially — see `research/04-novelty-verification-verdicts.md`).
+An empirical research project measuring price impact and order-flow dynamics on Binance from raw tick data. Learning-first: every Phase-1 result has a published benchmark to check against. Phase 2 carries the same machinery to a genuinely unoccupied spot (verified adversarially — see `docs/research/04-novelty-verification-verdicts.md`).
 
 **Primary goal:** the user learns market microstructure, statistics on real data, and large-dataset engineering well enough to defend every step in a quant interview.
 **Secondary goal:** a GitHub-presentable research repo with a defensible "some novelty" Phase 2.
@@ -81,7 +81,7 @@ LEARNING.md        # every concept explained as we hit it; interview-prep artifa
 |---|---|
 | Tick data volume overwhelms laptop | Start 2 symbols × 6 months; Parquet + polars lazy scans; downsample only with explicit justification |
 | bookTicker discontinued after 2024-04 (VERIFIED) | Resolved by design: Phase-1 window fixed to 2023-06→2024-03; recent-data analyses use trade prices + sampled bookDepth with documented caveats |
-| Estimator subtleties (log-log fitting traps) | Synthetic-data validation first, always; consult the pitfalls sections in research/02 |
+| Estimator subtleties (log-log fitting traps) | Synthetic-data validation first, always; consult the pitfalls sections in docs/research/02 |
 | Scope creep into Phase 2/3 early | Phase gates: Phase 1 write-up complete before any Phase 2 code |
 | User time (recruiting season) | Each research question is independently completable; stopping after Q2 still yields a coherent repo |
 

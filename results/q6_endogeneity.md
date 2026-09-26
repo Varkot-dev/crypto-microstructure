@@ -124,7 +124,7 @@ Median |α̂_median − n̂_CV| across 41 symbols: **0.2395**. Pearson correlati
 
 Across the 41 successful symbols, the median endogeneity level (median of per-symbol alpha_median) is **0.7070**, ranging from 0.3699 to 0.8790. Distance from criticality (alpha=1): **0.2930**.
 
-**Comparison to the literature**: Mark, Sila & Weber (2022, *European Journal of Finance*, research/02 citation) find BTC's endogeneity level, fit with power-law kernels, comparable to fiat FX markets — i.e. crypto is not structurally different from mature, near-critical asset classes in that study. This panel's exponential-kernel median of 0.7070 is broadly consistent with a near-critical regime at face value, but the exponential-kernel caveat below means this number is a LOWER bound on the true (power-law) endogeneity level, not a directly comparable point estimate to that literature's power-law fits.
+**Comparison to the literature**: Mark, Sila & Weber (2022, *European Journal of Finance*, docs/research/02 citation) find BTC's endogeneity level, fit with power-law kernels, comparable to fiat FX markets — i.e. crypto is not structurally different from mature, near-critical asset classes in that study. This panel's exponential-kernel median of 0.7070 is broadly consistent with a near-critical regime at face value, but the exponential-kernel caveat below means this number is a LOWER bound on the true (power-law) endogeneity level, not a directly comparable point estimate to that literature's power-law fits.
 
 Endogeneity **increases** with log-activity across the panel (slope 0.0286, R² 0.0017, n=41).
 

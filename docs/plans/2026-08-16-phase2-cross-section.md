@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or executing-plans. Checkbox steps.
 
-**Goal (the novel contribution, adversarially verified as unoccupied in research/04):** execute the joint propagator package — sign-ACF exponent γ, response R(ℓ), *deconvolved impact kernel* G(ℓ) with decay exponent β̂, and the critical-balance test β̂ ≈ (1−γ)/2 — as ONE package across a crypto cross-section spanning 3+ decades of liquidity. Secondary novel thread from Phase 1.5: the cross-sectional map of aggressor-flow persistence (BTC anti-persistent p_flip=0.579 vs ETH persistent 0.482 — does persistence flip with liquidity?).
+**Goal (the novel contribution, adversarially verified as unoccupied in docs/research/04):** execute the joint propagator package — sign-ACF exponent γ, response R(ℓ), *deconvolved impact kernel* G(ℓ) with decay exponent β̂, and the critical-balance test β̂ ≈ (1−γ)/2 — as ONE package across a crypto cross-section spanning 3+ decades of liquidity. Secondary novel thread from Phase 1.5: the cross-sectional map of aggressor-flow persistence (BTC anti-persistent p_flip=0.579 vs ETH persistent 0.482 — does persistence flip with liquidity?).
 
 **Data (scouted 2026-08-16, .superpowers/scratch/universe_ranked.txt):** 207 USDT-M perps with ≥1MB June-2023 aggTrades (7.7GB zipped total, syncing). Kernel panel: 16 symbols spanning ~509MB→~10MB monthly activity, all with daily bookTicker confirmed: BTCUSDT ETHUSDT 1000PEPEUSDT BCHUSDT XRPUSDT SOLUSDT LTCUSDT DOGEUSDT ARBUSDT OPUSDT SUIUSDT LINKUSDT APTUSDT INJUSDT EDUUSDT IDUSDT — 7-day bookTicker slices (2023-06-01..2023-06-07) each.
 

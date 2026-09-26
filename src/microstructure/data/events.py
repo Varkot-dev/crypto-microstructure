@@ -3,7 +3,7 @@
 One market order sweeping several book levels prints as several aggTrades
 rows with identical (ts, is_buyer_maker). Analyses of order-flow memory or
 impact must see ONE event per aggressor decision, or self-excitation at
-0-1ms lags is pure artifact (see research/02-hawkes-processes.md, pitfalls).
+0-1ms lags is pure artifact (see docs/research/02-hawkes-processes.md, pitfalls).
 
 Sign convention: is_buyer_maker == False -> buyer was the taker -> +1.
 """

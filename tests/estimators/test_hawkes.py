@@ -210,7 +210,7 @@ NEAR_CRITICAL_ALPHA = 0.85
 
 
 def test_near_critical_mle_recovers_within_widened_tolerance():
-    """Near n=1, mu/alpha become weakly identified locally (research/02 §4
+    """Near n=1, mu/alpha become weakly identified locally (docs/research/02 §4
     pitfall 5: 'near-unidentifiability at n≈1'); we widen tolerances vs the
     n=0.4 case rather than pretend the estimator is equally sharp everywhere.
     """
@@ -257,7 +257,7 @@ def test_poisson_refutation_both_estimators_report_near_zero():
 
 
 def test_regime_switching_poisson_produces_spurious_endogeneity_trap():
-    """THE TRAP (Filimonov & Sornette 2015, research/02-hawkes-processes.md,
+    """THE TRAP (Filimonov & Sornette 2015, docs/research/02-hawkes-processes.md,
     'The calibration counterattack' section, §2.4-equivalent discussion):
     n̂ ≈ near-critical can be MANUFACTURED FROM NOTHING. Fitting a Hawkes
     model (or the count-variance estimator) to a regime-switching Poisson

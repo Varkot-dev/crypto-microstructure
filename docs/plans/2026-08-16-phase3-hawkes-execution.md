@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or executing-plans. Checkbox steps.
 
-**Goal (remaining verified-open ground per research/02 §7 and research/04):** (A) the branching-ratio cross-section — is crypto order flow near-critical, and does endogeneity n̂ scale with activity? (only BTC ever measured; the estimation-pitfall fight between Filimonov-Sornette and Hardiman-Bouchaud is the methodological terrain); (B) the execution-cost simulator on replayed real data with OUR measured kernels — TWAP vs front-loaded vs flow-reactive schedules (the Alfonsi-Blanc-style transfer, unpublished for crypto).
+**Goal (remaining verified-open ground per docs/research/02 §7 and docs/research/04):** (A) the branching-ratio cross-section — is crypto order flow near-critical, and does endogeneity n̂ scale with activity? (only BTC ever measured; the estimation-pitfall fight between Filimonov-Sornette and Hardiman-Bouchaud is the methodological terrain); (B) the execution-cost simulator on replayed real data with OUR measured kernels — TWAP vs front-loaded vs flow-reactive schedules (the Alfonsi-Blanc-style transfer, unpublished for crypto).
 
-**Honesty doctrine (binding, from research/02 §4.2):** the branching ratio is estimator- and window-dependent; the SENSITIVITY IS THE FINDING. Every n̂ ships with: kernel-family sensitivity (exp vs 2-exp), window sensitivity, and the count-variance model-free cross-check. Never a single unqualified n̂.
+**Honesty doctrine (binding, from docs/research/02 §4.2):** the branching ratio is estimator- and window-dependent; the SENSITIVITY IS THE FINDING. Every n̂ ships with: kernel-family sensitivity (exp vs 2-exp), window sensitivity, and the count-variance model-free cross-check. Never a single unqualified n̂.
 
 **Data:** already on disk (207-symbol June aggTrades; 16-symbol 7-day bookTicker panel). No new downloads required.
 
@@ -16,7 +16,7 @@
 
 **Interfaces:**
 - `simulate_hawkes_exp(mu: float, alpha: float, beta: float, t_end: float, seed: int) -> np.ndarray` — event times via Ogata thinning for intensity λ(t) = mu + Σ alpha·beta·exp(−beta(t−t_i)) (branching ratio n = alpha; document the parameterization explicitly — alpha IS the branching ratio, kernel integral = alpha).
-- `fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit` frozen dataclass (mu, alpha, beta, loglik, converged: bool) — MLE via the O(N) recursion (research/02 §4.1: R_i = exp(−beta·Δt_i)(1+R_{i−1})); optimize with a small hand-rolled multi-start Nelder-Mead over (log mu, logit alpha, log beta) — numpy only, no scipy; 5 starts, document convergence criteria; alpha constrained to (0,1) via logistic transform.
+- `fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit` frozen dataclass (mu, alpha, beta, loglik, converged: bool) — MLE via the O(N) recursion (docs/research/02 §4.1: R_i = exp(−beta·Δt_i)(1+R_{i−1})); optimize with a small hand-rolled multi-start Nelder-Mead over (log mu, logit alpha, log beta) — numpy only, no scipy; 5 starts, document convergence criteria; alpha constrained to (0,1) via logistic transform.
 - `branching_count_variance(times: np.ndarray, window: float, t_end: float) -> float` — Hardiman-Bouchaud model-free n̂ = 1 − sqrt(mean(counts)/var(counts))… IMPLEMENT THE CORRECT FORMULA: for a stationary Hawkes, var(N_W)/mean(N_W) → 1/(1−n)² for large windows, so n̂ = 1 − sqrt(mean/var). Document the large-window assumption and that windows must be ≫ kernel timescale.
 
 **Tests (synthetic ground truth, the point of this task):**
@@ -34,7 +34,7 @@
 
 ### Task 3: Branching-ratio panel (`analyses/q6_endogeneity.py`)
 
-Per symbol over the 16-symbol panel + the 40 most-active universe symbols (56 total, June 2023 aggTrades, aggressor events): rescale to business time; fit on K=6 disjoint 2-day sub-windows: report per symbol median alpha, IQR, count-variance n̂ (window ≫ fitted 1/beta, documented), raw-vs-rescaled alpha delta (seasonality bias), convergence failures → failures list. Cross-section: alpha vs log10 activity regression. Outputs: results/q6_endogeneity.{md,json,parquet,png} (alpha vs activity, errorbars = sub-window IQR; second panel: MLE vs count-variance scatter with y=x). md findings: median endogeneity level vs the near-critical claims in the literature (research/02: EJF 2022 found BTC ≈ FX levels); whether n̂ scales with activity; the estimator-disagreement honesty table. CLI as before. Synthetic test: planted Hawkes symbols through parquet fixtures recover alphas; regime-switching fixture lands with documented inflated n̂ flagged by the raw-vs-rescaled delta.
+Per symbol over the 16-symbol panel + the 40 most-active universe symbols (56 total, June 2023 aggTrades, aggressor events): rescale to business time; fit on K=6 disjoint 2-day sub-windows: report per symbol median alpha, IQR, count-variance n̂ (window ≫ fitted 1/beta, documented), raw-vs-rescaled alpha delta (seasonality bias), convergence failures → failures list. Cross-section: alpha vs log10 activity regression. Outputs: results/q6_endogeneity.{md,json,parquet,png} (alpha vs activity, errorbars = sub-window IQR; second panel: MLE vs count-variance scatter with y=x). md findings: median endogeneity level vs the near-critical claims in the literature (docs/research/02: EJF 2022 found BTC ≈ FX levels); whether n̂ scales with activity; the estimator-disagreement honesty table. CLI as before. Synthetic test: planted Hawkes symbols through parquet fixtures recover alphas; regime-switching fixture lands with documented inflated n̂ flagged by the raw-vs-rescaled delta.
 - [ ] TDD → REAL RUN → commit with headline numbers.
 
 ### Task 4: Execution simulator (`execution/simulator.py` + `analyses/q7_execution.py`)

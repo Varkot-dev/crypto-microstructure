@@ -14,7 +14,7 @@ test_regime_switching_poisson_produces_spurious_endogeneity_trap`, which
 documents n_hat > 0.2 and fitted alpha > 0.5 on a process that is, by
 construction, not self-exciting at all — every crypto symbol has an intraday
 U-shape / funding-hour clustering pattern at least that strong). Business-
-time rescaling is the standard fix (research/02-hawkes-processes.md §2:
+time rescaling is the standard fix (docs/research/02-hawkes-processes.md §2:
 "remedies: time-varying mu(t), short quasi-stationary windows, volume-
 time"): under the deterministic time change tau(t) = integral_0^t
 rate(s) ds, a non-stationary-rate Poisson process becomes homogeneous in
@@ -567,7 +567,7 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
         lines.append("")
         lines.append(
             "**Comparison to the literature**: Mark, Sila & Weber (2022, *European Journal "
-            "of Finance*, research/02 citation) find BTC's endogeneity level, fit with "
+            "of Finance*, docs/research/02 citation) find BTC's endogeneity level, fit with "
             "power-law kernels, comparable to fiat FX markets — i.e. crypto is not "
             "structurally different from mature, near-critical asset classes in that study. "
             f"This panel's exponential-kernel median of {overall_median:.4f} is "

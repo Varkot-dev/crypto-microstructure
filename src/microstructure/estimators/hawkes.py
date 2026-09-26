@@ -4,12 +4,12 @@ Parameterization: intensity λ(t) = mu + Σ_{t_i < t} alpha*beta*exp(-beta*(t-t_
 The kernel is φ(t) = alpha*beta*exp(-beta*t); its integral over [0, ∞) is
     ∫ alpha*beta*exp(-beta*t) dt = alpha*beta * (1/beta) = alpha,
 so **alpha IS the branching ratio n** (Hawkes & Oakes 1974 branching
-interpretation: research/02-hawkes-processes.md §1 "Branching interpretation
+interpretation: docs/research/02-hawkes-processes.md §1 "Branching interpretation
 and criticality"). alpha in [0, 1) for a stationary process; alpha -> 1 is
 criticality; alpha >= 1 is explosive/non-stationary.
 
 Three independent estimators are provided so they can cross-check each
-other, as the literature insists on (research/02 §4 "Non-negotiables:
+other, as the literature insists on (docs/research/02 §4 "Non-negotiables:
 ... report n̂ sensitivity to window and kernel family"):
   - simulate_hawkes_exp: ground truth via Ogata (1978) thinning.
   - fit_hawkes_exp: parametric MLE using the O(N) exponential-kernel
@@ -22,7 +22,7 @@ The Poisson-refutation / regime-switching trap tests in
 tests/estimators/test_hawkes.py document a critical failure mode: on a
 non-stationary-rate (but NOT self-exciting) process, both a Hawkes MLE and
 the count-variance estimator report spurious positive endogeneity
-(Filimonov & Sornette 2015, research/02 §"The calibration counterattack").
+(Filimonov & Sornette 2015, docs/research/02 §"The calibration counterattack").
 This motivates deseasonalizing mu(t) before ever trusting an n̂ on real
 data.
 """
@@ -278,7 +278,7 @@ def hawkes_loglik(times: np.ndarray, t_end: float, mu: float, alpha: float, beta
 
     loglik = Σ_i log(mu + alpha*beta*R_i) - mu*T - alpha*Σ_i (1 - exp(-beta*(T-t_i)))
 
-    with R_1 = 0, R_{i+1} = exp(-beta*(t_{i+1}-t_i)) * (R_i + 1)  (research/02
+    with R_1 = 0, R_{i+1} = exp(-beta*(t_{i+1}-t_i)) * (R_i + 1)  (docs/research/02
     §4.1). R_i represents Σ_{j<i} exp(-beta*(t_i - t_j)), so
     mu + alpha*beta*R_i is exactly λ(t_i^-). The second term is the
     compensator ∫_0^T λ(t) dt, split into the baseline mu*T plus, for each
@@ -421,7 +421,7 @@ def fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit:
     mapped through a logistic transform into (0, 1) (per the brief: "alpha
     constrained to (0,1) via logistic transform"). Runs 5 multi-starts from
     spread initial points (mitigates the near-unidentifiability at n≈1
-    documented in research/02 §4 pitfall 5) and returns the best-loglik
+    documented in docs/research/02 §4 pitfall 5) and returns the best-loglik
     result. `converged` is True iff the winning start's simplex satisfies
     the Nelder-Mead spread-in-loglik convergence criterion (tol=1e-6).
 
@@ -431,7 +431,7 @@ def fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit:
     on with small moves. It does NOT mean the parameters themselves are
     well identified. Near n≈1 the likelihood surface can have a long,
     shallow ridge along which mu and alpha trade off (a small-mu/high-n
-    combination looks locally like a big-mu/low-n one — research/02 §4
+    combination looks locally like a big-mu/low-n one — docs/research/02 §4
     pitfall 5), so a fit can report `converged=True` while sitting
     anywhere along that ridge; the reported point estimate is then much
     less trustworthy than `converged=True` alone would suggest. Multi-
@@ -498,7 +498,7 @@ def branching_count_variance(times: np.ndarray, window: float, t_end: float) -> 
     (1/beta for the exponential kernel) — the large-window asymptotic is
     what makes the estimator "see" the amplification from clustering
     rather than just Poisson counting noise; too-small windows bias
-    n_hat toward 0 (research/02 §4: "short windows truncate long-memory
+    n_hat toward 0 (docs/research/02 §4: "short windows truncate long-memory
     kernels and bias n̂ down"). No kernel shape is assumed, which is the
     estimator's advantage (and, per the regime-switching trap test in
     tests/estimators/test_hawkes.py, also its weakness: it cannot

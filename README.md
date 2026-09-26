@@ -114,6 +114,7 @@ Full reproduction steps for every question (Q1 through the Phase-4 regime compar
 - CI (`.github/workflows/ci.yml`) runs `ruff check` and the non-network test suite on every push;
   the Pages workflow (`.github/workflows/pages.yml`) regenerates `site/data/*.json` from
   `results/` and fails the build if the committed slices are stale.
+- Test coverage: 89% of src/, measured 2026-09-26 with pytest-cov.
 
 ## Further reading
 

@@ -26,7 +26,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from microstructure.analyses.q5_kernel_panel import run_q5
+import pytest
+
+from microstructure.analyses.q5_kernel_panel import _judge_balance, run_q5
 from microstructure.data.catalog import parquet_path
 from microstructure.synthetic import fractional_signs
 
@@ -35,6 +37,47 @@ N_EVENTS = 500_000
 PLANTED_BETA = 0.35
 PLANTED_D = 0.35
 PLANTED_GAMMA = 1 - 2 * PLANTED_D  # = 0.30, theoretical sign-ACF exponent
+
+
+# ---------------------------------------------------------------------------
+# Isolated table-driven unit test of `_judge_balance` (no synthetic pipeline).
+#
+# `_judge_balance(delta, sd)` returns "consistent" iff
+# |delta| <= 2*max(sd, 0.04), else "violated". Two regimes:
+#   - sd < 0.04: the 0.04 bias floor binds -> threshold is always 0.08.
+#   - sd > 0.04: the block_sd itself binds -> threshold is 2*sd.
+# Each regime is tested just inside and just outside its threshold, plus
+# sign symmetry (the rule is on |delta|, so +delta and -delta must agree).
+# ---------------------------------------------------------------------------
+JUDGE_BALANCE_CASES = [
+    # (delta, beta_block_sd, expected_verdict, case_id)
+    # --- sd < 0.04: floor binds, threshold = 2*0.04 = 0.08 ---
+    (0.079, 0.01, "consistent", "floor_binds_just_inside_positive"),
+    (0.081, 0.01, "violated", "floor_binds_just_outside_positive"),
+    (-0.079, 0.01, "consistent", "floor_binds_just_inside_negative"),
+    (-0.081, 0.01, "violated", "floor_binds_just_outside_negative"),
+    # --- sd > 0.04: sd binds, threshold = 2*0.1 = 0.2 ---
+    (0.199, 0.1, "consistent", "sd_binds_just_inside_positive"),
+    (0.201, 0.1, "violated", "sd_binds_just_outside_positive"),
+    (-0.199, 0.1, "consistent", "sd_binds_just_inside_negative"),
+    (-0.201, 0.1, "violated", "sd_binds_just_outside_negative"),
+]
+
+
+@pytest.mark.parametrize(
+    "delta,beta_block_sd,expected", [c[:3] for c in JUDGE_BALANCE_CASES],
+    ids=[c[3] for c in JUDGE_BALANCE_CASES],
+)
+def test_judge_balance_threshold_regimes_and_sign_symmetry(
+    delta: float, beta_block_sd: float, expected: str
+):
+    assert _judge_balance(delta, beta_block_sd) == expected
+
+
+def test_judge_balance_sign_symmetry_is_exact():
+    """The verdict must depend only on |delta|, never on its sign, at any sd."""
+    for delta, sd in [(0.05, 0.01), (0.079, 0.02), (0.15, 0.1), (0.25, 0.1)]:
+        assert _judge_balance(delta, sd) == _judge_balance(-delta, sd)
 
 
 def _fft_convolve_full(a: np.ndarray, b: np.ndarray) -> np.ndarray:

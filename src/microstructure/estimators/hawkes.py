@@ -115,6 +115,90 @@ def simulate_hawkes_exp(mu: float, alpha: float, beta: float, t_end: float, seed
     return np.asarray(events, dtype=np.float64)
 
 
+def simulate_hawkes_multiexp(
+    mu: float, alphas: np.ndarray, betas: np.ndarray, t_end: float, seed: int
+) -> np.ndarray:
+    """Simulate a sum-of-exponentials-kernel Hawkes process via Ogata thinning.
+
+    λ(t) = mu + Σ_{t_i < t} φ(t - t_i), φ(t) = Σ_k alpha_k*beta_k*exp(-beta_k*t).
+
+    Branching ratio (total kernel integral) is n = Σ_k alpha_k, exactly as in
+    the single-exponential case (each component integrates to alpha_k). This
+    is the standard "sum of exponentials spanning decades of timescales" fix
+    for kernel misspecification noted in docs/research/02-hawkes-processes.md
+    §4 pitfall 3 ("Exponential fits to power-law data underestimate n; power-
+    law fits are sensitive to short-time regularization. Fit sums of
+    exponentials spanning decades of timescales; check n̂ stability.") — a
+    single exponential decays too fast to capture a long-memory/power-law-like
+    kernel's mass at long lags, so a K=1 MLE fit systematically underestimates
+    n on such data; a mixture of exponentials at well-separated timescales
+    approximates the long-memory shape and recovers more of that mass.
+
+    Reuses the same structure as `simulate_hawkes_exp`: each component's
+    excitation E_k(t) = Σ_{t_i<t} alpha_k*beta_k*exp(-beta_k*(t-t_i)) decays
+    smoothly between events and jumps by +alpha_k*beta_k at each accepted
+    event, so immediately after an event the total intensity
+    mu + Σ_k E_k(t_i^+) is the local maximum until the next accepted event
+    (sum of monotonically-decaying components is itself monotonically
+    decaying), giving a valid Ogata thinning upper bound.
+    """
+    if t_end <= 0.0:
+        raise ValueError("t_end must be positive")
+    if mu <= 0.0:
+        raise ValueError("mu must be positive")
+
+    alphas = np.asarray(alphas, dtype=np.float64)
+    betas = np.asarray(betas, dtype=np.float64)
+    if alphas.ndim != 1 or betas.ndim != 1 or alphas.size == 0:
+        raise ValueError("alphas and betas must be non-empty 1-D arrays")
+    if alphas.size != betas.size:
+        raise ValueError(
+            f"alphas and betas must have the same length; got {alphas.size} and {betas.size}"
+        )
+    if np.any(betas <= 0.0):
+        raise ValueError("all betas must be positive")
+    if np.any(alphas < 0.0):
+        raise ValueError("all alphas must be non-negative")
+
+    n = float(np.sum(alphas))
+    if n >= 1.0:
+        raise ValueError(
+            f"branching ratio n=sum(alphas)={n} must be < 1; n >= 1 is explosive/"
+            "non-stationary and thinning would never terminate."
+        )
+
+    rng = np.random.default_rng(seed)
+    events: list[float] = []
+
+    k = alphas.size
+    t = 0.0
+    excitation = np.zeros(k, dtype=np.float64)  # E_k(t) just after last processed point
+    peak_jump = alphas * betas  # each accepted event adds alpha_k*beta_k to E_k
+    lambda_bar = mu + excitation.sum() + peak_jump.sum()
+
+    while t < t_end:
+        t += rng.exponential(1.0 / lambda_bar)
+        if t >= t_end:
+            break
+
+        if events:
+            dt_last = t - events[-1]
+            excitation_at_t = excitation * np.exp(-betas * dt_last)
+        else:
+            excitation_at_t = np.zeros(k, dtype=np.float64)
+
+        lam_t = mu + excitation_at_t.sum()
+        u = rng.random()
+        if u <= lam_t / lambda_bar:
+            events.append(t)
+            excitation = excitation_at_t + peak_jump
+            lambda_bar = mu + excitation.sum() + peak_jump.sum()
+        # else rejected: lambda_bar remains valid (each component only
+        # decays between accepted events), continue thinning from t.
+
+    return np.asarray(events, dtype=np.float64)
+
+
 def simulate_seasonal_hawkes_exp(
     mu_bar: float, alpha: float, beta: float, t_end: float, shape: np.ndarray, seed: int
 ) -> np.ndarray:
@@ -480,6 +564,365 @@ def fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit:
     beta = float(np.exp(log_beta))
 
     return HawkesFit(mu=mu, alpha=alpha, beta=beta, loglik=best_ll, converged=best_converged)
+
+
+# ---------------------------------------------------------------------------
+# Sum-of-exponentials MLE: K parallel recursions + the same Nelder-Mead,
+# extended to dimension 1+2K. See docs/research/02-hawkes-processes.md §4
+# pitfall 3: "Fit sums of exponentials spanning decades of timescales; check
+# n̂ stability" — the point of this section is to make that check possible.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MultiExpFit:
+    """Result of `fit_hawkes_multiexp`.
+
+    `converged` mirrors `HawkesFit.converged`'s caveat: it is True iff the
+    winning multi-start's Nelder-Mead simplex satisfied the tol=1e-6
+    f-spread stopping criterion, which says only that the optimizer stopped
+    improving locally -- NOT that `alphas`/`betas` are well identified. This
+    is a weaker guarantee at K>=2 than at K=1: a K=3 fit can (and, on this
+    module's own planted-kernel test data, does) report `converged=True`
+    while two components sit on a flat ridge with near-duplicate betas
+    (e.g. betas=(0.194, 4.890, 4.890) splitting one true component's mass
+    across a degenerate pair). `n = sum(alphas)` is generally far better
+    identified than the individual components at high K; see
+    `fit_hawkes_multiexp`'s docstring for the full discussion.
+    """
+
+    mu: float
+    alphas: np.ndarray
+    betas: np.ndarray
+    n: float
+    loglik: float
+    converged: bool
+    K: int
+
+
+def hawkes_multiexp_loglik(
+    times: np.ndarray, t_end: float, mu: float, alphas: np.ndarray, betas: np.ndarray
+) -> float:
+    """Exact log-likelihood for the sum-of-exponentials kernel.
+
+    loglik = Σ_i log(mu + Σ_k alpha_k*beta_k*R_{k,i}) - mu*T
+             - Σ_k alpha_k*Σ_i (1 - exp(-beta_k*(T-t_i)))
+
+    Each R_k is the SAME single-exponential recursion as `hawkes_loglik`
+    (R_{k,1}=0, R_{k,i+1} = exp(-beta_k*(t_{i+1}-t_i))*(R_{k,i}+1)), run K
+    times in parallel — one call to `_excitation_recursion` per component,
+    since the components do not interact except by summing into the total
+    intensity. This reuses the existing O(N log N) vectorized recursion
+    exactly, just K times instead of once; K is small (1-3 in practice) so
+    this stays cheap relative to the O(N log N) cost of each recursion.
+    """
+    n_events = times.size
+    if n_events == 0:
+        return -mu * t_end
+
+    if mu <= 0.0 or betas.size == 0 or np.any(betas <= 0.0) or np.any(alphas < 0.0):
+        return -np.inf
+    total_n = float(np.sum(alphas))
+    if total_n >= 1.0:
+        return -np.inf
+
+    dt = np.diff(times)
+    intensities = np.full(n_events, mu, dtype=np.float64)
+    compensator_excitation = 0.0
+    for alpha_k, beta_k in zip(alphas, betas, strict=True):
+        decay_k = np.exp(-beta_k * dt)
+        r_k = _excitation_recursion(decay_k)
+        intensities = intensities + alpha_k * beta_k * r_k
+        compensator_excitation += alpha_k * np.sum(1.0 - np.exp(-beta_k * (t_end - times)))
+
+    if np.any(intensities <= 0.0):
+        return -np.inf
+
+    log_sum = np.sum(np.log(intensities))
+    compensator_baseline = mu * t_end
+
+    return float(log_sum - compensator_baseline - compensator_excitation)
+
+
+def _alphas_from_logits(alpha_logits: np.ndarray) -> np.ndarray:
+    """Map K unconstrained logits to K alphas with guaranteed Σalpha_k < 1.
+
+    Softmax-with-a-slack-slot: append an implicit 0-logit "non-branching"
+    slot to the K free logits, softmax over all K+1 slots, then drop the
+    slack slot's probability. This gives K non-negative numbers that sum to
+    strictly less than 1 (the slack slot always retains positive mass since
+    exp(0)=1 > 0 in the softmax denominator), for any finite logits — so the
+    optimizer can never wander into the explosive/non-stationary n>=1
+    region, without a boundary penalty. Equivalent in spirit to the
+    single-exponential case's logistic-into-(0,1) transform, generalized to
+    K components sharing one probability budget.
+    """
+    padded = np.concatenate([alpha_logits, [0.0]])
+    shifted = padded - np.max(padded)  # numerical stability
+    weights = np.exp(shifted)
+    probs = weights / np.sum(weights)
+    return probs[:-1]
+
+
+def _neg_multiexp_loglik_transformed(
+    params: np.ndarray, times: np.ndarray, t_end: float, k: int
+) -> float:
+    """Negative log-likelihood as a function of unconstrained (log mu, K alpha-logits, K log-betas)."""
+    log_mu = params[0]
+    alpha_logits = params[1 : 1 + k]
+    log_betas = params[1 + k : 1 + 2 * k]
+
+    mu = float(np.exp(log_mu))
+    alphas = _alphas_from_logits(alpha_logits)
+    betas = np.exp(log_betas)
+
+    ll = hawkes_multiexp_loglik(times, t_end, mu, alphas, betas)
+    if not np.isfinite(ll):
+        return 1e18
+    return -ll
+
+
+def fit_hawkes_multiexp(
+    times: np.ndarray, t_end: float, K: int, betas_init: np.ndarray | None = None
+) -> MultiExpFit:
+    """MLE of (mu, alphas, betas) for a K-component sum-of-exponentials Hawkes kernel.
+
+    Optimizes over 1+2K unconstrained parameters (log mu, K alpha-logits
+    mapped through `_alphas_from_logits` so Σalpha_k < 1 always holds, K
+    log-betas) using the same hand-rolled Nelder-Mead as `fit_hawkes_exp`,
+    multi-started from `betas_init` (default: log-spaced across decades —
+    0.1, 1, 10, ... per unit time, extended/truncated to K values — so the
+    mixture is initialized to actually span timescales rather than
+    collapsing to K copies of the same decay rate) combined with a few
+    perturbed alpha/mu starting points.
+
+    For K=1 this must (and, per `test_multiexp_k1_matches_fit_hawkes_exp`,
+    does) reproduce `fit_hawkes_exp` on the same data: with one component the
+    alpha-logit softmax-with-slack-slot reduces exactly to a logistic map
+    into (0,1), i.e. the same reparameterization `fit_hawkes_exp` uses, and
+    the log-likelihoods (`hawkes_multiexp_loglik` vs `hawkes_loglik`) are the
+    same expression with one term, so both optimizers search the identical
+    surface. In practice two independent Nelder-Mead runs (different simplex
+    paths, including different multi-start beta seeds) land within ~1e-7 of
+    each other in log-likelihood and mu/alpha, and ~1e-5 in beta (the
+    flattest direction near the optimum) — see
+    `test_multiexp_k1_matches_fit_hawkes_exp`'s measured diffs and asserted
+    tolerances (loglik/mu/alpha at 1e-5, beta at 1e-4). This is the floor
+    set by each optimizer's own tol=1e-6 f-spread stopping criterion, not a
+    discrepancy between the two code paths.
+
+    THE POINT OF THIS FUNCTION (docs/research/02-hawkes-processes.md §4
+    pitfall 3): a single exponential is too short-memoried to represent a
+    long-memory/power-law-like true kernel, so a K=1 fit systematically
+    underestimates n = Σalpha_k. Increasing K lets the mixture spread mass
+    across widely-separated timescales and recover more of the long-lag
+    kernel weight, pulling n̂ up toward the true value. Re-fitting the same
+    data at K=1,2,3 and reporting how n̂ MOVES across K (see
+    `branching_ratio_sensitivity`) is therefore the intended diagnostic on
+    real data, not a nuisance to average away.
+
+    KNOWN IDENTIFIABILITY WEAKNESS AT LARGE K: once K exceeds the number of
+    timescales actually resolvable from the data's sample size and window,
+    components become interchangeable/degenerate (two components can trade
+    off alpha and beta against each other while barely changing the
+    likelihood, similar in spirit to the near-critical mu/alpha ridge
+    documented on `fit_hawkes_exp`). Individual `alphas`/`betas` at K=3 and
+    above should be treated as much less identified than their sum n; this
+    is why `branching_ratio_sensitivity`'s docs recommend reporting n̂(K),
+    not the per-component parameters, as the headline diagnostic.
+
+    `converged` HAS THE SAME CAVEAT AS `fit_hawkes_exp`'s: it reflects ONLY
+    that the winning start's Nelder-Mead simplex stopped spreading out in
+    log-likelihood (the tol=1e-6 f-spread criterion), NOT that the
+    parameters are well identified. This is *more* likely to bite at K>=2
+    than in the single-exponential case: a K=3 fit can report
+    `converged=True` while sitting on a degenerate ridge where two
+    components have nearly duplicate betas and one carries almost all the
+    weight -- e.g. `test_multiexp_k3_on_two_exp_data_does_not_blow_up`'s own
+    planted-data K=3 fit converges to alphas=(0.348, 0.007, 0.245) with
+    betas=(0.194, 4.890, 4.890), a duplicate-beta pair splitting what a
+    correctly-specified K=2 fit represents as one component. The SUM n is
+    still trustworthy there (it matches K=2 to three decimal places); the
+    individual per-component (alpha, beta) values are not, regardless of
+    what `converged` says.
+
+    CONFOUND WARNING — BASELINE NON-STATIONARITY CAN MIMIC LONG MEMORY: a
+    K=1 -> K=2 rise in n̂ together with a slow (small beta) second
+    component is the SAME numerical signature produced by two completely
+    different underlying causes, and n̂(K) alone cannot distinguish them:
+      1. Genuine long-memory kernel (the motivating case above): the extra
+         slow component recovers real, slowly-decaying self-excitation mass
+         a K=1 fit truncated.
+      2. Residual baseline non-stationarity (Filimonov & Sornette 2015,
+         also documented on `simulate_seasonal_hawkes_exp` /
+         `branching_count_variance`): if mu(t) is not actually constant
+         (imperfect deseasonalization, a regime change, a slow intraday
+         drift) but the model assumes constant mu, the misspecified
+         exponential-kernel MLE can "explain" the baseline's slow swings by
+         inventing a spurious slow self-exciting component instead -- the
+         mixture fits the drift, not real branching. This is the exact same
+         family of failure as the regime-switching trap already documented
+         on `branching_count_variance` and exercised in
+         `test_regime_switching_produces_spurious_endogeneity`, now shown to
+         also fool the MULTI-exponential MLE, not just the single-exponential
+         one or the count-variance estimator.
+         `test_seasonal_baseline_confound_mimics_long_memory` demonstrates
+         this concretely: a TRUE single-exponential Hawkes process (n=0.4,
+         beta=2.0, no long memory at all) with a piecewise-constant ±30%
+         baseline wobble produces n̂1=0.46 -> n̂2=0.83 with a spurious
+         beta≈0.02 "slow" component, the same qualitative signature as the
+         genuine-long-memory headline test.
+
+    PER-SYMBOL OBSERVABLE TO REPORT (so this can be diagnosed on real data,
+    not just guessed at): for any slow component that appears when K
+    increases, report its timescale 1/beta_slow next to (a) the
+    deseasonalization bin width used to build mu(t) and (b) the fit-window
+    length. If 1/beta_slow is comparable to or larger than the
+    deseasonalization bin width, or is a large fraction of the fit-window
+    length, the "slow component" is a prime suspect for absorbed baseline
+    drift rather than real long-memory self-excitation -- a genuine
+    long-memory timescale should be well inside the fit window and
+    unrelated to the deseasonalization binning choice.
+
+    THE CONTROL: re-fit K=1 with a block-wise PIECEWISE-CONSTANT mu(t)
+    (one free mu per block, e.g. matching the deseasonalization bins or the
+    non-stationarity block length under suspicion) instead of a single
+    constant mu, then re-run the K=1 vs K=2 comparison. If the spurious slow
+    component VANISHES once the baseline is allowed to vary block-wise, the
+    original K=1->K=2 jump was baseline drift, not kernel misspecification.
+    If it persists even with a flexible block-wise baseline soaking up the
+    non-stationarity, that is evidence for genuine long memory. This module
+    does not yet implement a block-wise-mu variant of `fit_hawkes_multiexp`
+    (see `simulate_seasonal_hawkes_exp` for the seasonal SIMULATOR
+    counterpart) -- running this control is a prerequisite for trusting any
+    single-symbol K=1->K=2 jump as evidence of long memory, not an optional
+    nicety.
+    """
+    if times.size < 2:
+        raise ValueError("need at least 2 events to fit")
+    if K < 1:
+        raise ValueError(f"K must be >= 1; got {K}")
+
+    if betas_init is None:
+        # Log-spaced across decades: 0.1, 1, 10, 100, ... /unit time.
+        betas_init = np.array([10.0 ** (exp - 1) for exp in range(K)], dtype=np.float64)
+    else:
+        betas_init = np.asarray(betas_init, dtype=np.float64)
+        if betas_init.size != K:
+            raise ValueError(f"betas_init must have length K={K}; got {betas_init.size}")
+        if np.any(betas_init <= 0.0):
+            raise ValueError("betas_init must be strictly positive")
+
+    n_events = times.size
+    mean_rate = n_events / t_end
+
+    # Multi-start: vary the total branching-ratio budget, mu scale, AND a
+    # multiplicative shift on betas_init (0.5x, 2x) so the two starts don't
+    # search from identical beta seeds -- different starts don't collapse
+    # onto identical local optima. Two starts (rather than fit_hawkes_exp's
+    # five) keep runtime bounded as K grows -- each start already costs O(K)
+    # recursions per Nelder-Mead evaluation over a 1+2K-dimensional simplex,
+    # and betas_init already does most of the work of spanning timescales,
+    # so the marginal value of extra starts is lower here than in the
+    # single-exponential case. max_iter=600 (vs fit_hawkes_exp's 500) gives
+    # the larger simplex (dim+1 = 2+2K vertices) enough iterations to
+    # actually reach the tol=1e-6 stopping criterion at K=3 rather than
+    # exhausting the iteration budget mid-search.
+    total_n_starts = [0.5, 0.25]
+    mu_fracs = [0.5, 0.7]
+    beta_shifts = [0.5, 2.0]
+    max_iter = 600
+
+    best_params: np.ndarray | None = None
+    best_ll = -np.inf
+    best_converged = False
+
+    for total_n0, mu_frac, beta_shift in zip(total_n_starts, mu_fracs, beta_shifts, strict=True):
+        mu0 = mean_rate * mu_frac
+        # Split total_n0 equally across K components as the starting point;
+        # the alpha-logit softmax-with-slack-slot reaches this via equal
+        # logits summing (with the implicit 0 slack logit) to total_n0.
+        equal_share = total_n0 / K
+        # Solve for a common logit z such that K*exp(z) / (K*exp(z) + 1) = total_n0
+        # => exp(z) = total_n0 / (K*(1-total_n0)) => z = log(...).
+        common_logit = np.log(equal_share / (1.0 - total_n0))
+        alpha_logits0 = np.full(K, common_logit, dtype=np.float64)
+        betas0 = betas_init * beta_shift
+
+        x0 = np.concatenate([[np.log(mu0)], alpha_logits0, np.log(betas0)])
+        best_x, best_f, converged = _nelder_mead(
+            lambda p: _neg_multiexp_loglik_transformed(p, times, t_end, K),
+            x0,
+            max_iter=max_iter,
+        )
+        ll = -best_f
+        if ll > best_ll:
+            best_ll = ll
+            best_params = best_x
+            best_converged = converged
+
+    assert best_params is not None
+    log_mu = best_params[0]
+    alpha_logits = best_params[1 : 1 + K]
+    log_betas = best_params[1 + K : 1 + 2 * K]
+
+    mu = float(np.exp(log_mu))
+    alphas = _alphas_from_logits(alpha_logits)
+    betas = np.exp(log_betas)
+    n = float(np.sum(alphas))
+
+    return MultiExpFit(
+        mu=mu,
+        alphas=alphas,
+        betas=betas,
+        n=n,
+        loglik=best_ll,
+        converged=best_converged,
+        K=K,
+    )
+
+
+def branching_ratio_sensitivity(
+    times: np.ndarray, t_end: float, Ks: tuple[int, ...] = (1, 2, 3)
+) -> dict[int, MultiExpFit]:
+    """Fit the sum-of-exponentials kernel at each K in `Ks` and return all fits.
+
+    This is the panel-level diagnostic docs/research/02-hawkes-processes.md
+    §4 calls for: "Fit sums of exponentials spanning decades of timescales;
+    check n̂ stability." Rather than picking one K and reporting a single n̂,
+    the intended use is to inspect `{K: fit.n for K, fit in result.items()}`
+    and report the SPREAD across K, not just the K=3 (or whichever) point
+    estimate — a large jump from K=1 to K=2 that then stabilizes at K=3 is
+    itself the finding (evidence the single-exponential branching ratio was
+    biased low by kernel misspecification, per the project's headline
+    41/41-symbol disagreement between the exp-kernel MLE and the model-free
+    count-variance estimator). A n̂(K) that keeps climbing without
+    stabilizing, or that becomes unstable/non-converged at higher K, is
+    itself informative (see `fit_hawkes_multiexp`'s identifiability caveat)
+    and should be reported rather than papered over by picking the
+    best-converged K.
+
+    CONFOUND WARNING (see `fit_hawkes_multiexp`'s docstring for full detail):
+    a rising n̂(K) with a slow (small beta) component appearing at higher K
+    is NOT on its own evidence of long memory -- residual baseline
+    non-stationarity (imperfect deseasonalization, regime changes, slow
+    intraday drift) produces the identical signature, because a
+    misspecified constant-mu fit can "explain" slow baseline swings with a
+    spurious slow self-exciting component instead
+    (`test_seasonal_baseline_confound_mimics_long_memory` demonstrates this
+    on a TRUE single-exponential process with no long memory at all). Before
+    reporting a symbol's K=1->K=2 jump as evidence of long-memory
+    self-excitation:
+      1. Report the slow component's timescale 1/beta_slow next to the
+         deseasonalization bin width and the fit-window length -- a
+         timescale comparable to either is a red flag for absorbed drift
+         rather than genuine long memory.
+      2. Run the control: re-fit K=1 with a block-wise piecewise-constant
+         mu(t) instead of a single constant mu. If the spurious slow
+         component vanishes under that control, the jump was baseline
+         drift, not kernel misspecification.
+    """
+    return {K: fit_hawkes_multiexp(times, t_end, K) for K in Ks}
 
 
 # ---------------------------------------------------------------------------

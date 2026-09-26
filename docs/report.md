@@ -315,7 +315,7 @@ is doing more work in 2026 than it was in 2023.
 
 ```bash
 git clone git@github.com:Varkot-dev/crypto-microstructure.git
-cd QR-Project
+cd crypto-microstructure
 uv sync
 ```
 

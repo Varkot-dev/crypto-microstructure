@@ -30,6 +30,7 @@ in the single-digit seconds.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -41,6 +42,7 @@ from microstructure.analyses.q6b_kernel_sensitivity import (
     DESEASON_BIN_WIDTH_S,
     DRIFT_SUSPECT_MULTIPLIER,
     _is_drift_suspect,
+    _symbol_record,
     run_q6b,
 )
 from microstructure.data.catalog import parquet_path
@@ -309,3 +311,64 @@ def test_drift_suspect_boundary_is_strictly_greater_than():
 def test_drift_suspect_flags_non_finite_timescale():
     assert _is_drift_suspect(float("inf")) is True
     assert _is_drift_suspect(float("nan")) is True
+
+
+# --- JSON serializability of the per-symbol record -------------------------
+
+# Every scalar value that can appear inside a `_symbol_record` return value
+# (directly or nested inside `n_median_by_k`/`n_converged_by_k`/`per_window`)
+# must be one of these Python-native types. numpy scalars (np.bool_,
+# np.float64, np.int64, ...) are NOT included here on purpose: this is the
+# regression this test guards against (json.dumps raises `TypeError: Object
+# of type bool/float64/... is not JSON serializable` on a numpy scalar, even
+# though `isinstance(np.bool_(True), bool)` etc. can be True/False depending
+# on the numpy version -- the type() check below is deliberately exact, not
+# isinstance-based, so a numpy subclass cannot slip through).
+_JSON_NATIVE_SCALAR_TYPES = (str, int, float, bool, type(None))
+
+
+def _assert_only_native_scalars(value: object, path: str = "$") -> None:
+    """Recursively assert every leaf in a JSON-able structure is a Python-
+    native scalar (str/int/float/bool/None), not a numpy scalar subclass.
+
+    `type(value) in _JSON_NATIVE_SCALAR_TYPES` (not `isinstance`) is
+    intentional: `numpy.bool_`/`numpy.float64` register as subclasses of
+    `bool`/`float` on some numpy versions, which would let an isinstance
+    check silently pass on exactly the regression this test exists to catch.
+    """
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _assert_only_native_scalars(v, f"{path}.{k}")
+        return
+    if isinstance(value, list):
+        for i, v in enumerate(value):
+            _assert_only_native_scalars(v, f"{path}[{i}]")
+        return
+    assert type(value) in _JSON_NATIVE_SCALAR_TYPES, (
+        f"{path}: expected a Python-native scalar, got {type(value).__name__} ({value!r}) "
+        "-- numpy scalars (e.g. numpy.bool_, numpy.float64) are not JSON serializable "
+        "by json.dumps and must be coerced with bool()/float()/int() at the record-"
+        "building site before being placed in the record dict"
+    )
+
+
+def test_symbol_record_round_trips_through_json_dumps(planted_root: Path):
+    """The per-symbol record dict `_symbol_record` returns must contain only
+    Python-native scalar types and must round-trip through `json.dumps`
+    (allow_nan=True, the default -- Delta21/ratios can be NaN when a K value
+    is absent or a slow component's beta rounds to zero) without raising.
+
+    This directly targets the hotfix regression: `fit.converged` (from
+    `fit_hawkes_multiexp`) and the `_is_drift_suspect` comparison result can
+    both arrive as numpy scalar types rather than Python `bool`, and
+    `json.dumps` has no default encoder for those -- `TypeError: Object of
+    type bool is not JSON serializable` (the numpy bool's __class__.__name__
+    prints as "bool", which is what made this regression confusing).
+    """
+    rec = _symbol_record(planted_root, "ONEEXPUSDT", "2023-06", WINDOWS, KS)
+
+    encoded = json.dumps(rec)  # must not raise; allow_nan=True is the default
+    decoded = json.loads(encoded)
+    assert decoded["symbol"] == "ONEEXPUSDT"
+
+    _assert_only_native_scalars(rec)

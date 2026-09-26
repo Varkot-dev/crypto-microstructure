@@ -120,12 +120,17 @@ def _fit_capped_multiexp(times: np.ndarray, t_end: float, k: int) -> dict:
     fit = fit_hawkes_multiexp(times, t_end, K=k)
     beta_slow = float(np.min(fit.betas))
     return {
-        "n": fit.n,
-        "alphas": fit.alphas.tolist(),
-        "betas": fit.betas.tolist(),
+        "n": float(fit.n),
+        "alphas": [float(a) for a in fit.alphas],
+        "betas": [float(b) for b in fit.betas],
         "beta_slow": beta_slow,
         "inv_beta_slow": float(1.0 / beta_slow) if beta_slow > 0.0 else float("inf"),
-        "converged": fit.converged,
+        # `fit.converged` is annotated `bool` but the Nelder-Mead simplex
+        # comparison it ultimately comes from operates on numpy arrays, so
+        # it can arrive as `numpy.bool_` rather than a Python bool. `bool()`
+        # coerces it to a JSON-serializable Python bool at the source, so no
+        # numpy scalar carrying `converged` propagates further downstream.
+        "converged": bool(fit.converged),
     }
 
 
@@ -177,7 +182,11 @@ def _is_drift_suspect(median_inv_beta_slow_k2: float) -> bool:
     times the deseasonalization bin width. See module docstring."""
     if not np.isfinite(median_inv_beta_slow_k2):
         return True
-    return median_inv_beta_slow_k2 > DRIFT_SUSPECT_MULTIPLIER * DESEASON_BIN_WIDTH_S
+    # `median_inv_beta_slow_k2` is frequently a numpy float64 (it comes from
+    # np.median), so the comparison below yields numpy.bool_, not a Python
+    # bool, despite this function's `-> bool` annotation. Coerce at the
+    # source so callers (and json.dumps downstream) always see a Python bool.
+    return bool(median_inv_beta_slow_k2 > DRIFT_SUSPECT_MULTIPLIER * DESEASON_BIN_WIDTH_S)
 
 
 def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[int, ...]) -> dict:

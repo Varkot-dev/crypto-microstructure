@@ -25,7 +25,6 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-
 import pytest
 
 from microstructure.analyses.q5_kernel_panel import _judge_balance, run_q5

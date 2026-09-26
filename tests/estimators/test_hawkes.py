@@ -23,6 +23,7 @@ from microstructure.estimators.hawkes import (
     simulate_hawkes_exp,
     simulate_hawkes_multiexp,
     simulate_seasonal_hawkes_exp,
+    spurious_delta21_null,
 )
 
 # ---------------------------------------------------------------------------
@@ -636,4 +637,43 @@ def test_seasonal_baseline_confound_mimics_long_memory():
         f"expected the baseline-drift confound to produce a spurious "
         f"n̂ jump > 0.2 (true n=0.4, no long memory at all); got "
         f"n̂1={fit_k1.n}, n̂2={fit_k2.n}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# spurious_delta21_null: finite-sample null distribution of Delta21 under a
+# TRUE single-exp kernel (no long memory at all), used to calibrate how large
+# a real symbol's Delta21 must be before it is more than sampling noise.
+# ---------------------------------------------------------------------------
+
+
+def test_spurious_delta21_null_median_is_positive_at_small_sample():
+    """At a modest per-window event count (10k), the K=2 fit's extra
+    flexibility should on average absorb some sampling noise into a spurious
+    second component even though the truth is exactly K=1 -- documenting the
+    upward finite-sample bias `spurious_delta21_null` exists to calibrate
+    against. n_sims=3 keeps this within the runtime budget; the median of
+    3 draws is noisy but the effect is consistently positive across seeds
+    (measured during development: medians of 0.03, 0.01-0.02 across several
+    seed choices, never negative or exactly zero)."""
+    null = spurious_delta21_null(10_000, mu=0.5, alpha=0.4, beta=2.0, n_sims=3, seed=123)
+    assert null.shape == (3,)
+    assert np.median(null) > 0.0, (
+        f"expected a positive median Delta21 under a true K=1 process at "
+        f"n=10k events (finite-sample bias), got median={np.median(null)}, null={null}"
+    )
+
+
+def test_spurious_delta21_null_shrinks_with_sample_size():
+    """The finite-sample bias documented above shrinks as the per-window
+    event count grows: more events per window pin down the K=1 residuals
+    more tightly, leaving less noise for a spurious second component to
+    absorb. Same seed reused at both sizes so the comparison isolates the
+    sample-size effect from seed variation as much as 3 sims allows."""
+    null_small = spurious_delta21_null(10_000, mu=0.5, alpha=0.4, beta=2.0, n_sims=3, seed=123)
+    null_large = spurious_delta21_null(40_000, mu=0.5, alpha=0.4, beta=2.0, n_sims=3, seed=123)
+    assert np.median(null_large) < np.median(null_small), (
+        f"expected the null median to shrink from n=10k to n=40k events/window, "
+        f"got median_small={np.median(null_small)} ({null_small}), "
+        f"median_large={np.median(null_large)} ({null_large})"
     )

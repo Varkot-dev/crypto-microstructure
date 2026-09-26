@@ -571,7 +571,7 @@ def test_run_q8_non_native_regime_unaffected_by_native_flag_absence(three_regime
     # Survivorship block present for every regime; no "overlap" block at all.
     assert set(result["survivorship"].keys()) == {"2023-07", "2024-07", "2026-07"}
     assert result.get("overlap", {}) == {}
-    for label, s in result["regime_summaries"].items():
+    for s in result["regime_summaries"].values():
         assert s["universe"] == "fixed"
 
 

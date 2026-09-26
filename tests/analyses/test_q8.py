@@ -1,6 +1,6 @@
 """Tests for Q8: regime comparator (Phase 4, Task 2).
 
-Contract under test (see docs/superpowers/plans/2026-09-24-phase4-regimes.md,
+Contract under test (see docs/plans/2026-09-24-phase4-regimes.md,
 Task 2, and its binding elaboration):
 
 1. Three fake regime dirs with planted `q4_cross_section.json` (+ q6 for

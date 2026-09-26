@@ -24,7 +24,7 @@ from microstructure.data.catalog import parquet_path
 from microstructure.estimators.acf import fit_power_law, sign_acf
 from microstructure.signals.load import load_events
 
-LIT_RANGE = (0.3, 0.7)  # equity/futures sign-ACF exponent range, research/01+03
+LIT_RANGE = (0.3, 0.7)  # equity/futures sign-ACF exponent range, docs/research/01+03
 MAX_LAG = 1000
 FIT_LO, FIT_HI = 10, 500
 

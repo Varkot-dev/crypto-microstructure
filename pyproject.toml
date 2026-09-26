@@ -1,6 +1,9 @@
 [project]
 name = "microstructure"
 version = "0.1.0"
+description = "Empirical market microstructure on Binance tick data: order-flow memory, impact kernels, Hawkes endogeneity, and execution replay across a 121-symbol cross-section."
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "polars>=1.0",
@@ -8,6 +11,10 @@ dependencies = [
     "numpy>=1.26",
     "matplotlib>=3.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Varkot-dev/crypto-microstructure"
+Results = "https://varkot-dev.github.io/crypto-microstructure/"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.5"]

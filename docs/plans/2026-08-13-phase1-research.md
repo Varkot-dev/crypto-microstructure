@@ -577,7 +577,7 @@ In `catalog.py`: `sync_days` identical to `sync` but iterating `day_files`; fact
 
 **Interfaces:**
 - Produces: `run_q1(root: Path, out_dir: Path, symbols: list[str], periods: list[str], max_lag: int = 1000) -> dict` returning `{symbol: {"gamma": float, "stderr": float, "n_events": int, "acf": list}}`, writing `out_dir/q1_acf_loglog.png` (log-log ACF for all symbols with fitted lines) and `out_dir/q1_results.md` (markdown: methodology paragraph, results table, benchmark table comparing to literature values, caveats). CLI: `python -m microstructure.analyses.q1_orderflow_memory --root data --out results` (argparse; defaults symbols=BTCUSDT,ETHUSDT periods=2023-06,2023-07).
-- Benchmark table content (cite as literature ranges, sourced in research/01+03): equities/futures sign-ACF exponent γ ≈ 0.3–0.7 (Bouchaud et al. 2004); persistence horizon thousands of trades. The script states whether our γ falls in that range — either outcome is a documented finding, not a pass/fail.
+- Benchmark table content (cite as literature ranges, sourced in docs/research/01+03): equities/futures sign-ACF exponent γ ≈ 0.3–0.7 (Bouchaud et al. 2004); persistence horizon thousands of trades. The script states whether our γ falls in that range — either outcome is a documented finding, not a pass/fail.
 
 - [ ] **Step 1: `uv add "matplotlib>=3.9"`**
 
@@ -646,7 +646,7 @@ import numpy as np
 from microstructure.estimators.acf import fit_power_law, sign_acf
 from microstructure.signals.load import load_events
 
-LIT_RANGE = (0.3, 0.7)  # equity/futures sign-ACF exponent range, research/01+03
+LIT_RANGE = (0.3, 0.7)  # equity/futures sign-ACF exponent range, docs/research/01+03
 
 
 def run_q1(root: Path, out_dir: Path, symbols: list[str], periods: list[str],

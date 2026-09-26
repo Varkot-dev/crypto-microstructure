@@ -529,7 +529,7 @@ git commit -m "feat: schema-normalizing zip-CSV to Parquet ingestion for aggTrad
 
 **Interfaces:**
 - Consumes: aggTrades Parquet schema from Task 4.
-- Produces: `to_aggressor_events(df: pl.DataFrame) -> pl.DataFrame` with schema `ts: datetime[ms, UTC], sign: i8 (+1 buy aggressor / −1 sell), qty: f64 (summed), price: f64 (qty-weighted avg), n_prints: u32`. Consecutive aggTrades rows sharing (ts, is_buyer_maker) are merged into ONE event — this is the one-market-order-many-prints fix from the spec (research/02 §4.2 pitfall 1).
+- Produces: `to_aggressor_events(df: pl.DataFrame) -> pl.DataFrame` with schema `ts: datetime[ms, UTC], sign: i8 (+1 buy aggressor / −1 sell), qty: f64 (summed), price: f64 (qty-weighted avg), n_prints: u32`. Consecutive aggTrades rows sharing (ts, is_buyer_maker) are merged into ONE event — this is the one-market-order-many-prints fix from the spec (docs/research/02 §4.2 pitfall 1).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -604,7 +604,7 @@ Expected: FAIL (ImportError).
 One market order sweeping several book levels prints as several aggTrades
 rows with identical (ts, is_buyer_maker). Analyses of order-flow memory or
 impact must see ONE event per aggressor decision, or self-excitation at
-0-1ms lags is pure artifact (see research/02-hawkes-processes.md, pitfalls).
+0-1ms lags is pure artifact (see docs/research/02-hawkes-processes.md, pitfalls).
 
 Sign convention: is_buyer_maker == False -> buyer was the taker -> +1.
 """

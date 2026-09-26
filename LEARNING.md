@@ -249,7 +249,7 @@ mechanically produces a power-law sign ACF. If ETH's metaorders are relatively l
 finely split than BTC's, ETH's γ would be lower.
 *Test:* this needs metaorder identification. Binance public dumps have no account IDs, so it
 cannot be tested here. A venue with per-user attribution (Hyperliquid's on-chain log — see
-`research/04-novelty-verification-verdicts.md`) could.
+`docs/research/04-novelty-verification-verdicts.md`) could.
 
 **2. Retail herding.** Genuinely distinct traders correlating with each other rather than one
 trader splitting an order — momentum-chasing, social-media-driven flow, liquidation cascades.
@@ -367,7 +367,7 @@ what you know.
 
 The bathtub analogy has a limit worth stating: real refill is not passive physics. Market makers
 choose whether to replenish, and in stress they widen or step away — which is exactly why impact
-is state-dependent and why the "liquidity stress" literature in `research/` exists.
+is state-dependent and why the "liquidity stress" literature in `docs/research/` exists.
 
 ### What R(ℓ) measures
 
@@ -1042,7 +1042,7 @@ Every number in §6.2 and §6.3 is bounded by:
 
 ### 6.5 On the novelty question
 
-`research/04-novelty-verification-verdicts.md` records three agents tasked with *refuting* this
+`docs/research/04-novelty-verification-verdicts.md` records three agents tasked with *refuting* this
 project's novelty claims. On the Phase-2 claim specifically ("the propagator program has never
 been applied across a crypto cross-section"), the verdict was that the strong form is **factually
 false** — a 2026 Hyperliquid study covers 201 perp markets and 641M fills with impact curves and
@@ -1995,7 +1995,7 @@ consistency check Q2 used.
 
 **Phase 2, the cross-section — done, with the results in §6.** 121 symbols on the trades side,
 16 on the kernel panel. I checked the novelty question adversarially first — three agents tasked
-with refuting the gap claims, written up in `research/04-novelty-verification-verdicts.md`. The
+with refuting the gap claims, written up in `docs/research/04-novelty-verification-verdicts.md`. The
 honest verdict is that everything in Phase 1 is well-trodden, which is exactly what I wanted for
 a learning project, since published benchmarks exist at every step. For Phase 2, a Hyperliquid
 study has already done 201 perp markets and 641M fills, so the surviving gap is narrow: the joint
@@ -2383,4 +2383,4 @@ mechanism. I'd also flag that the MLE-vs-count-variance gap **widened** over the
   square-root impact law, which is why Q7's linear own-impact scaling is flagged as a local
   approximation valid only at the small child sizes it actually uses.
 
-The full annotated library, including the adversarial novelty verification, is in `research/`.
+The full annotated library, including the adversarial novelty verification, is in `docs/research/`.

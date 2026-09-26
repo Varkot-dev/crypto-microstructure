@@ -406,6 +406,17 @@ def test_simulate_seasonal_reduces_to_unseasonal_statistically():
 # it; a K=3 fit (over-parameterized relative to the truth) should still be
 # in the right ballpark without blowing up. This directly probes the
 # project's headline 41/41-symbol exp-MLE-vs-count-variance disagreement.
+#
+# CRITICAL CAVEAT tested at the end of this group
+# (`test_seasonal_baseline_confound_mimics_long_memory`): the K=1->K=2 n̂
+# rise / slow-component signature used above as evidence of genuine long
+# memory is NOT unique to long memory. Residual baseline non-stationarity
+# (imperfect deseasonalization, regime changes) produces the identical
+# numerical signature in a process with NO long memory at all -- n̂(K)
+# alone cannot tell the two apart. See that test's and
+# `fit_hawkes_multiexp`'s docstrings for the diagnostic (compare the slow
+# component's timescale to the deseasonalization bin width / fit-window
+# length) and the control (re-fit K=1 with a block-wise-constant baseline).
 # ---------------------------------------------------------------------------
 
 # Planted 2-exponential kernel: alpha=(0.25, 0.35) [n=0.6], beta=(5, 0.2)
@@ -421,7 +432,7 @@ PLANTED_T_END = 48_000.0
 
 
 def test_multiexp_k1_matches_fit_hawkes_exp():
-    """K=1 must reproduce fit_hawkes_exp to ~1e-6 on the same data.
+    """K=1 must reproduce fit_hawkes_exp on the same data.
 
     With one component, the alpha-logit softmax-with-slack-slot reduces
     exactly to the logistic map fit_hawkes_exp itself uses, so the two
@@ -437,20 +448,21 @@ def test_multiexp_k1_matches_fit_hawkes_exp():
     assert multi.K == 1
     assert multi.alphas.shape == (1,)
     assert multi.betas.shape == (1,)
-    # "~1e-6" per spec: the two fits run independent Nelder-Mead searches
-    # (different simplex paths) over the SAME reparameterized likelihood, so
-    # they converge to the same optimum only up to each optimizer's own
-    # tol=1e-6 loglik-spread stopping criterion, not to bit-identical
-    # parameters. Loglik agrees to ~1e-6 (both are at the true optimum);
-    # mu/alpha/beta agree to a few 1e-5 as a consequence of the (very flat
-    # near the optimum) beta direction, which is the expected floor for two
-    # independently-terminated simplex searches, not a discrepancy in the
-    # underlying model.
-    assert abs(multi.mu - single.mu) < 1e-4, (multi.mu, single.mu)
-    assert abs(multi.alphas[0] - single.alpha) < 1e-4, (multi.alphas[0], single.alpha)
-    assert abs(multi.betas[0] - single.beta) < 1e-3, (multi.betas[0], single.beta)
-    assert abs(multi.n - single.alpha) < 1e-4
-    assert abs(multi.loglik - single.loglik) < 1e-3, (multi.loglik, single.loglik)
+    # The two fits run independent Nelder-Mead searches (different simplex
+    # paths, including different multi-start beta seeds) over the SAME
+    # reparameterized likelihood, so they converge to the same optimum only
+    # up to each optimizer's own tol=1e-6 loglik-spread stopping criterion,
+    # not to bit-identical parameters. Measured on this dataset: loglik
+    # agrees to ~1e-7, mu/alpha to ~1e-6/1e-7, beta (the flattest direction
+    # near this optimum) to ~3e-5. Tolerances below (loglik 1e-5, mu/alpha
+    # 1e-5, beta 1e-4) leave comfortable headroom above those measured
+    # diffs while still being tight enough to demonstrate the two code paths
+    # are mathematically identical, not simply "close enough."
+    assert abs(multi.mu - single.mu) < 1e-5, (multi.mu, single.mu)
+    assert abs(multi.alphas[0] - single.alpha) < 1e-5, (multi.alphas[0], single.alpha)
+    assert abs(multi.betas[0] - single.beta) < 1e-4, (multi.betas[0], single.beta)
+    assert abs(multi.n - single.alpha) < 1e-5
+    assert abs(multi.loglik - single.loglik) < 1e-5, (multi.loglik, single.loglik)
 
 
 def test_simulate_multiexp_rejects_invalid_parameters():
@@ -580,3 +592,48 @@ def test_branching_ratio_sensitivity_returns_fit_per_k(planted_sensitivity):
     assert results[3].K == 3
     # Reproduce the K-sensitivity finding through the convenience wrapper too.
     assert results[1].n < results[2].n
+
+
+def test_seasonal_baseline_confound_mimics_long_memory():
+    """THE CONFOUND TRAP, sitting deliberately next to the headline
+    long-memory test above: a K=1 -> K=2 rise in n̂ with a slow (small
+    beta) second component is NOT unique evidence of long-memory
+    self-excitation. It is ALSO produced by residual baseline
+    non-stationarity that a constant-mu fit cannot represent, per the
+    Filimonov & Sornette (2015) regime-switching trap already documented
+    on `branching_count_variance` (see
+    `test_regime_switching_produces_spurious_endogeneity`) -- this test
+    shows the SAME confound also fools the multi-exponential MLE, not just
+    the single-exponential MLE or the count-variance estimator.
+
+    Ground truth here is a TRUE single-exponential Hawkes process (n=0.4,
+    beta=2.0 -- no long memory whatsoever) with a piecewise-constant ±30%
+    baseline wobble on 600s blocks (`np.tile([0.7, 1.3], 72)` over a
+    60_000s window = 144 alternating 0.7x/1.3x-mean blocks of 600s/72... in
+    `simulate_seasonal_hawkes_exp`'s bin convention this divides the 86400s
+    day into 144 bins of 600s each, and t_end=60_000s covers a bit over half
+    that period). Despite zero true long memory, K=1 -> K=2 shows
+    n̂1=0.46 -> n̂2=0.83 (a jump exceeding 0.2) with a spurious near-zero
+    beta component -- numerically indistinguishable in shape from the
+    genuine-long-memory signature in
+    `test_multiexp_k1_underestimates_planted_two_timescale_kernel` /
+    `test_multiexp_k2_recovers_planted_two_timescale_kernel` above. THE
+    POINT: n̂(K) sensitivity alone cannot distinguish "the true kernel has
+    long memory" from "the baseline is not actually constant" -- per
+    `fit_hawkes_multiexp`'s docstring, distinguishing them requires (a)
+    checking the slow component's timescale 1/beta_slow against the
+    deseasonalization bin width and fit-window length, and (b) the
+    block-wise-constant-mu control.
+    """
+    shape = np.tile([0.7, 1.3], 72)
+    t_end = 60_000.0
+    times = simulate_seasonal_hawkes_exp(0.5, 0.4, 2.0, t_end, shape, seed=5)
+
+    fit_k1 = fit_hawkes_multiexp(times, t_end, K=1)
+    fit_k2 = fit_hawkes_multiexp(times, t_end, K=2)
+
+    assert fit_k2.n - fit_k1.n > 0.2, (
+        f"expected the baseline-drift confound to produce a spurious "
+        f"n̂ jump > 0.2 (true n=0.4, no long memory at all); got "
+        f"n̂1={fit_k1.n}, n̂2={fit_k2.n}"
+    )

@@ -576,6 +576,21 @@ def fit_hawkes_exp(times: np.ndarray, t_end: float) -> HawkesFit:
 
 @dataclass(frozen=True)
 class MultiExpFit:
+    """Result of `fit_hawkes_multiexp`.
+
+    `converged` mirrors `HawkesFit.converged`'s caveat: it is True iff the
+    winning multi-start's Nelder-Mead simplex satisfied the tol=1e-6
+    f-spread stopping criterion, which says only that the optimizer stopped
+    improving locally -- NOT that `alphas`/`betas` are well identified. This
+    is a weaker guarantee at K>=2 than at K=1: a K=3 fit can (and, on this
+    module's own planted-kernel test data, does) report `converged=True`
+    while two components sit on a flat ridge with near-duplicate betas
+    (e.g. betas=(0.194, 4.890, 4.890) splitting one true component's mass
+    across a degenerate pair). `n = sum(alphas)` is generally far better
+    identified than the individual components at high K; see
+    `fit_hawkes_multiexp`'s docstring for the full discussion.
+    """
+
     mu: float
     alphas: np.ndarray
     betas: np.ndarray
@@ -687,10 +702,13 @@ def fit_hawkes_multiexp(
     into (0,1), i.e. the same reparameterization `fit_hawkes_exp` uses, and
     the log-likelihoods (`hawkes_multiexp_loglik` vs `hawkes_loglik`) are the
     same expression with one term, so both optimizers search the identical
-    surface. In practice two independent Nelder-Mead runs land within ~1e-6
-    of each other in log-likelihood and a few 1e-5/1e-4 in the parameters
-    themselves (the beta direction is flat near the optimum) — this is the
-    floor set by each optimizer's own tol=1e-6 stopping criterion, not a
+    surface. In practice two independent Nelder-Mead runs (different simplex
+    paths, including different multi-start beta seeds) land within ~1e-7 of
+    each other in log-likelihood and mu/alpha, and ~1e-5 in beta (the
+    flattest direction near the optimum) — see
+    `test_multiexp_k1_matches_fit_hawkes_exp`'s measured diffs and asserted
+    tolerances (loglik/mu/alpha at 1e-5, beta at 1e-4). This is the floor
+    set by each optimizer's own tol=1e-6 f-spread stopping criterion, not a
     discrepancy between the two code paths.
 
     THE POINT OF THIS FUNCTION (docs/research/02-hawkes-processes.md §4
@@ -712,6 +730,73 @@ def fit_hawkes_multiexp(
     above should be treated as much less identified than their sum n; this
     is why `branching_ratio_sensitivity`'s docs recommend reporting n̂(K),
     not the per-component parameters, as the headline diagnostic.
+
+    `converged` HAS THE SAME CAVEAT AS `fit_hawkes_exp`'s: it reflects ONLY
+    that the winning start's Nelder-Mead simplex stopped spreading out in
+    log-likelihood (the tol=1e-6 f-spread criterion), NOT that the
+    parameters are well identified. This is *more* likely to bite at K>=2
+    than in the single-exponential case: a K=3 fit can report
+    `converged=True` while sitting on a degenerate ridge where two
+    components have nearly duplicate betas and one carries almost all the
+    weight -- e.g. `test_multiexp_k3_on_two_exp_data_does_not_blow_up`'s own
+    planted-data K=3 fit converges to alphas=(0.348, 0.007, 0.245) with
+    betas=(0.194, 4.890, 4.890), a duplicate-beta pair splitting what a
+    correctly-specified K=2 fit represents as one component. The SUM n is
+    still trustworthy there (it matches K=2 to three decimal places); the
+    individual per-component (alpha, beta) values are not, regardless of
+    what `converged` says.
+
+    CONFOUND WARNING — BASELINE NON-STATIONARITY CAN MIMIC LONG MEMORY: a
+    K=1 -> K=2 rise in n̂ together with a slow (small beta) second
+    component is the SAME numerical signature produced by two completely
+    different underlying causes, and n̂(K) alone cannot distinguish them:
+      1. Genuine long-memory kernel (the motivating case above): the extra
+         slow component recovers real, slowly-decaying self-excitation mass
+         a K=1 fit truncated.
+      2. Residual baseline non-stationarity (Filimonov & Sornette 2015,
+         also documented on `simulate_seasonal_hawkes_exp` /
+         `branching_count_variance`): if mu(t) is not actually constant
+         (imperfect deseasonalization, a regime change, a slow intraday
+         drift) but the model assumes constant mu, the misspecified
+         exponential-kernel MLE can "explain" the baseline's slow swings by
+         inventing a spurious slow self-exciting component instead -- the
+         mixture fits the drift, not real branching. This is the exact same
+         family of failure as the regime-switching trap already documented
+         on `branching_count_variance` and exercised in
+         `test_regime_switching_produces_spurious_endogeneity`, now shown to
+         also fool the MULTI-exponential MLE, not just the single-exponential
+         one or the count-variance estimator.
+         `test_seasonal_baseline_confound_mimics_long_memory` demonstrates
+         this concretely: a TRUE single-exponential Hawkes process (n=0.4,
+         beta=2.0, no long memory at all) with a piecewise-constant ±30%
+         baseline wobble produces n̂1=0.46 -> n̂2=0.83 with a spurious
+         beta≈0.02 "slow" component, the same qualitative signature as the
+         genuine-long-memory headline test.
+
+    PER-SYMBOL OBSERVABLE TO REPORT (so this can be diagnosed on real data,
+    not just guessed at): for any slow component that appears when K
+    increases, report its timescale 1/beta_slow next to (a) the
+    deseasonalization bin width used to build mu(t) and (b) the fit-window
+    length. If 1/beta_slow is comparable to or larger than the
+    deseasonalization bin width, or is a large fraction of the fit-window
+    length, the "slow component" is a prime suspect for absorbed baseline
+    drift rather than real long-memory self-excitation -- a genuine
+    long-memory timescale should be well inside the fit window and
+    unrelated to the deseasonalization binning choice.
+
+    THE CONTROL: re-fit K=1 with a block-wise PIECEWISE-CONSTANT mu(t)
+    (one free mu per block, e.g. matching the deseasonalization bins or the
+    non-stationarity block length under suspicion) instead of a single
+    constant mu, then re-run the K=1 vs K=2 comparison. If the spurious slow
+    component VANISHES once the baseline is allowed to vary block-wise, the
+    original K=1->K=2 jump was baseline drift, not kernel misspecification.
+    If it persists even with a flexible block-wise baseline soaking up the
+    non-stationarity, that is evidence for genuine long memory. This module
+    does not yet implement a block-wise-mu variant of `fit_hawkes_multiexp`
+    (see `simulate_seasonal_hawkes_exp` for the seasonal SIMULATOR
+    counterpart) -- running this control is a prerequisite for trusting any
+    single-symbol K=1->K=2 jump as evidence of long memory, not an optional
+    nicety.
     """
     if times.size < 2:
         raise ValueError("need at least 2 events to fit")
@@ -731,27 +816,28 @@ def fit_hawkes_multiexp(
     n_events = times.size
     mean_rate = n_events / t_end
 
-    # Multi-start: vary the total branching-ratio budget and mu scale, but
-    # always seed betas log-spaced across decades (shifted per start so
-    # different starts don't collapse onto identical local optima). Two
-    # starts (rather than fit_hawkes_exp's five) keep runtime bounded as K
-    # grows -- each start already costs O(K) recursions per Nelder-Mead
-    # evaluation over a 1+2K-dimensional simplex, and betas_init already
-    # does most of the work of spanning timescales, so the marginal value
-    # of extra starts is lower here than in the single-exponential case.
-    # max_iter=600 (vs fit_hawkes_exp's 500) gives the larger simplex
-    # (dim+1 = 2+2K vertices) enough iterations to actually reach the
-    # tol=1e-6 stopping criterion at K=3 rather than exhausting the
-    # iteration budget mid-search.
+    # Multi-start: vary the total branching-ratio budget, mu scale, AND a
+    # multiplicative shift on betas_init (0.5x, 2x) so the two starts don't
+    # search from identical beta seeds -- different starts don't collapse
+    # onto identical local optima. Two starts (rather than fit_hawkes_exp's
+    # five) keep runtime bounded as K grows -- each start already costs O(K)
+    # recursions per Nelder-Mead evaluation over a 1+2K-dimensional simplex,
+    # and betas_init already does most of the work of spanning timescales,
+    # so the marginal value of extra starts is lower here than in the
+    # single-exponential case. max_iter=600 (vs fit_hawkes_exp's 500) gives
+    # the larger simplex (dim+1 = 2+2K vertices) enough iterations to
+    # actually reach the tol=1e-6 stopping criterion at K=3 rather than
+    # exhausting the iteration budget mid-search.
     total_n_starts = [0.5, 0.25]
     mu_fracs = [0.5, 0.7]
+    beta_shifts = [0.5, 2.0]
     max_iter = 600
 
     best_params: np.ndarray | None = None
     best_ll = -np.inf
     best_converged = False
 
-    for total_n0, mu_frac in zip(total_n_starts, mu_fracs, strict=True):
+    for total_n0, mu_frac, beta_shift in zip(total_n_starts, mu_fracs, beta_shifts, strict=True):
         mu0 = mean_rate * mu_frac
         # Split total_n0 equally across K components as the starting point;
         # the alpha-logit softmax-with-slack-slot reaches this via equal
@@ -761,8 +847,9 @@ def fit_hawkes_multiexp(
         # => exp(z) = total_n0 / (K*(1-total_n0)) => z = log(...).
         common_logit = np.log(equal_share / (1.0 - total_n0))
         alpha_logits0 = np.full(K, common_logit, dtype=np.float64)
+        betas0 = betas_init * beta_shift
 
-        x0 = np.concatenate([[np.log(mu0)], alpha_logits0, np.log(betas_init)])
+        x0 = np.concatenate([[np.log(mu0)], alpha_logits0, np.log(betas0)])
         best_x, best_f, converged = _nelder_mead(
             lambda p: _neg_multiexp_loglik_transformed(p, times, t_end, K),
             x0,
@@ -814,6 +901,26 @@ def branching_ratio_sensitivity(
     itself informative (see `fit_hawkes_multiexp`'s identifiability caveat)
     and should be reported rather than papered over by picking the
     best-converged K.
+
+    CONFOUND WARNING (see `fit_hawkes_multiexp`'s docstring for full detail):
+    a rising n̂(K) with a slow (small beta) component appearing at higher K
+    is NOT on its own evidence of long memory -- residual baseline
+    non-stationarity (imperfect deseasonalization, regime changes, slow
+    intraday drift) produces the identical signature, because a
+    misspecified constant-mu fit can "explain" slow baseline swings with a
+    spurious slow self-exciting component instead
+    (`test_seasonal_baseline_confound_mimics_long_memory` demonstrates this
+    on a TRUE single-exponential process with no long memory at all). Before
+    reporting a symbol's K=1->K=2 jump as evidence of long-memory
+    self-excitation:
+      1. Report the slow component's timescale 1/beta_slow next to the
+         deseasonalization bin width and the fit-window length -- a
+         timescale comparable to either is a red flag for absorbed drift
+         rather than genuine long memory.
+      2. Run the control: re-fit K=1 with a block-wise piecewise-constant
+         mu(t) instead of a single constant mu. If the spurious slow
+         component vanishes under that control, the jump was baseline
+         drift, not kernel misspecification.
     """
     return {K: fit_hawkes_multiexp(times, t_end, K) for K in Ks}
 

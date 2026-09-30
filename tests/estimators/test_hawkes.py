@@ -12,14 +12,20 @@ import numpy as np
 import pytest
 
 from microstructure.estimators.hawkes import (
+    MAX_PIECEWISE_BLOCKS,
     HawkesFit,
     MultiExpFit,
+    PiecewiseMuFit,
+    _drift_verdict,
     _nelder_mead,
+    baseline_drift_control,
     branching_count_variance,
     branching_ratio_sensitivity,
     fit_hawkes_exp,
+    fit_hawkes_exp_piecewise_mu,
     fit_hawkes_multiexp,
     hawkes_loglik,
+    hawkes_piecewise_mu_loglik,
     simulate_hawkes_exp,
     simulate_hawkes_multiexp,
     simulate_seasonal_hawkes_exp,
@@ -677,3 +683,195 @@ def test_spurious_delta21_null_shrinks_with_sample_size():
         f"got median_small={np.median(null_small)} ({null_small}), "
         f"median_large={np.median(null_large)} ({null_large})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Group 7: piecewise-baseline Hawkes control (`fit_hawkes_exp_piecewise_mu`,
+# `baseline_drift_control`) -- THE CONTROL described in `fit_hawkes_multiexp`'s
+# "THE CONTROL" section: re-fit K=1 with a block-wise constant baseline
+# instead of a single constant mu, to test whether a K=1->K=2 rise survives
+# once the baseline is allowed to vary, or vanishes (i.e. was baseline drift
+# absorbed by a spurious slow kernel component all along).
+#
+# RESOLUTION: a block-wise baseline can only absorb drift SLOWER than the
+# block width t_end/n_blocks. The drift fixture below therefore uses a slow
+# baseline (4 levels per 86400 s day, i.e. 21600 s per level) against 5000 s
+# blocks. A fast wobble (e.g. the 1200 s-period fixture of
+# `test_seasonal_baseline_confound_mimics_long_memory`) averages out inside
+# any block the <=12-block cap allows and is NOT resolvable by this control.
+# ---------------------------------------------------------------------------
+
+
+def test_piecewise_mu_loglik_matches_numerical_intensity_integration():
+    """Verify the block-wise-baseline log-likelihood formula against
+    brute-force numerical integration, mirroring
+    `test_loglik_matches_numerical_intensity_integration` for the constant-mu
+    case. Uses 10 fixed event times (not simulated) with a 4-block baseline
+    over t_end=10 so block boundaries fall at non-trivial points relative to
+    the events."""
+    times = np.array([1.0, 1.3, 2.1, 2.15, 3.0, 4.4, 4.5, 4.55, 6.0, 8.0])
+    t_end = 10.0
+    n_blocks = 4
+    mus = np.array([0.2, 0.4, 0.1, 0.5])
+    alpha, beta = 0.5, 1.5
+    block_width = t_end / n_blocks
+
+    ll_closed = hawkes_piecewise_mu_loglik(times, t_end, mus, alpha, beta, n_blocks)
+
+    def mu_of_t(t: float) -> float:
+        idx = min(int(t // block_width), n_blocks - 1)
+        return float(mus[idx])
+
+    log_sum = 0.0
+    for i, ti in enumerate(times):
+        prior = times[:i]
+        excitation = np.sum(alpha * beta * np.exp(-beta * (ti - prior))) if i > 0 else 0.0
+        log_sum += np.log(mu_of_t(ti) + excitation)
+
+    grid = np.linspace(0.0, t_end, 2_000_000)
+    excitation_grid = np.zeros_like(grid)
+    for ti in times:
+        mask = grid > ti
+        excitation_grid[mask] += alpha * beta * np.exp(-beta * (grid[mask] - ti))
+    mu_grid = mus[np.minimum((grid // block_width).astype(int), n_blocks - 1)]
+    lam_grid = mu_grid + excitation_grid
+    compensator_numeric = np.trapezoid(lam_grid, grid)
+
+    ll_numeric = log_sum - compensator_numeric
+    assert abs(ll_closed - ll_numeric) < 1e-3, (ll_closed, ll_numeric)
+
+
+def test_piecewise_mu_guards_invalid_n_blocks_and_t_end():
+    times = np.array([1.0, 2.0, 3.0, 4.0])
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(times, 10.0, n_blocks=0)
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(times, 10.0, n_blocks=-1)
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(times, 10.0, n_blocks=MAX_PIECEWISE_BLOCKS + 1)
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(times, 0.0, n_blocks=4)
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(times, -100.0, n_blocks=4)
+    with pytest.raises(ValueError):
+        fit_hawkes_exp_piecewise_mu(np.array([1.0]), 10.0, n_blocks=4)  # < 2 events
+
+
+def test_baseline_drift_control_guards_invalid_n_blocks_and_t_end():
+    times = simulate_hawkes_exp(0.5, 0.4, 2.0, 1000.0, seed=1)
+    with pytest.raises(ValueError):
+        baseline_drift_control(times, 0.0, n_blocks=8)
+    with pytest.raises(ValueError):
+        baseline_drift_control(times, -1.0, n_blocks=8)
+    with pytest.raises(ValueError):
+        baseline_drift_control(times, 1000.0, n_blocks=0)
+    with pytest.raises(ValueError):
+        baseline_drift_control(times, 1000.0, n_blocks=MAX_PIECEWISE_BLOCKS + 1)
+
+
+def test_piecewise_mu_recovers_stationary_process():
+    """Sanity check: on a TRULY stationary single-exp process (constant mu,
+    no drift at all), the piecewise fit (8 blocks) should recover alpha
+    within +-0.05 of the true 0.4 and each block's mu within +-25% of the
+    true constant mu=0.5 (block-level sampling noise, not drift -- with only
+    ~5-6k events per block at this window/block-count, per-block mu has real
+    sampling variance even with zero underlying non-stationarity)."""
+    mu, alpha, beta = 0.5, 0.4, 2.0
+    t_end = 50_000.0
+    times = simulate_hawkes_exp(mu, alpha, beta, t_end, seed=3)
+
+    fit = fit_hawkes_exp_piecewise_mu(times, t_end, n_blocks=8)
+
+    assert isinstance(fit, PiecewiseMuFit)
+    assert fit.n_blocks == 8
+    assert fit.mus.shape == (8,)
+    assert fit.n == fit.alpha
+    assert abs(fit.alpha - alpha) < 0.05, f"alpha={fit.alpha}"
+    assert np.all(np.abs(fit.mus - mu) / mu < 0.25), f"mus={fit.mus}"
+
+
+@pytest.mark.parametrize(
+    ("k2_rise", "dll_pw", "dll_k2", "n_blocks", "expected"),
+    [
+        # No material K=2 rise: always inconclusive, even with huge dll_pw.
+        (0.1, 500.0, 500.0, 12, "inconclusive"),
+        (0.05, 500.0, 500.0, 12, "inconclusive"),
+        # n_blocks=12 -> threshold = 19.675/2 = 9.8375.
+        (0.3, 9.84, 10.0, 12, "drift"),  # just above threshold, >= 0.5*dll_k2
+        (0.3, 9.83, 10.0, 12, "long_memory_candidate"),  # just below threshold
+        (0.3, 100.0, 150.0, 12, "drift"),  # above threshold and >= half of dll_k2
+        (0.3, 75.0, 150.0, 12, "drift"),  # exactly half of dll_k2
+        (0.3, 74.9, 150.0, 12, "inconclusive"),  # significant but < half of dll_k2
+        (0.3, 0.0, 100.0, 12, "long_memory_candidate"),
+        # n_blocks=2 -> df=1 -> threshold = 3.841/2 = 1.9205.
+        (0.3, 1.93, 2.0, 2, "drift"),
+        (0.3, 1.92, 2.0, 2, "long_memory_candidate"),
+    ],
+)
+def test_drift_verdict_rule_table(k2_rise, dll_pw, dll_k2, n_blocks, expected):
+    assert _drift_verdict(k2_rise, dll_pw, dll_k2, n_blocks) == expected
+
+
+def test_drift_verdict_rejects_unsupported_n_blocks():
+    with pytest.raises(ValueError):
+        _drift_verdict(0.3, 1.0, 1.0, 1)
+    with pytest.raises(ValueError):
+        _drift_verdict(0.3, 1.0, 1.0, MAX_PIECEWISE_BLOCKS + 1)
+
+
+def test_baseline_drift_control_on_resolvable_drift_is_drift():
+    """A TRUE single-exponential Hawkes process (n=0.4, beta=2.0, no long
+    memory) whose baseline steps between 0.7x and 1.3x every 21600 s (4
+    levels over a 86400 s day; `shape = np.tile([0.7, 1.3], 2)`). With
+    n_blocks=12 over t_end=60000 s the block width is 5000 s, well below the
+    drift timescale, so the block-wise baseline CAN absorb it. The constant-mu
+    K=1 fit reads n ~= 0.46 and K=2 rises far above it by placing a very slow
+    component on the drift; the piecewise fit gets most of that likelihood
+    back and the verdict is 'drift'."""
+    shape = np.tile([0.7, 1.3], 2)
+    t_end = 60_000.0
+    times = simulate_seasonal_hawkes_exp(0.5, 0.4, 2.0, t_end, shape, seed=5)
+
+    result = baseline_drift_control(times, t_end, n_blocks=12)
+
+    assert set(result) == {
+        "n_k1",
+        "n_k2",
+        "n_k1_piecewise",
+        "slow_beta_k2",
+        "dll_pw",
+        "dll_k2",
+        "dll_threshold",
+        "verdict",
+    }
+    k2_rise = result["n_k2"] - result["n_k1"]
+    assert k2_rise > 0.1, f"result={result}"
+    assert result["dll_pw"] >= -1e-6, f"nesting violated: {result}"
+    assert result["dll_pw"] >= result["dll_threshold"], f"result={result}"
+    assert result["verdict"] == "drift", f"result={result}"
+
+
+def test_baseline_drift_control_on_two_exp_process_is_not_drift():
+    """On a genuinely 2-exponential STATIONARY process (alpha=(0.25,0.35),
+    beta=(5,0.2), true n=0.6 -- the same planted-kernel fixture as
+    `test_multiexp_k2_recovers_planted_two_timescale_kernel`) the K=1 fit
+    underestimates while K=2 recovers the true n. There is no baseline drift,
+    so the block-wise baseline must not explain the K=2 gain and the verdict
+    must not be 'drift'."""
+    mu = 0.5
+    alphas = np.array([0.25, 0.35])
+    betas = np.array([5.0, 0.2])
+    t_end = 48_000.0
+    true_n = float(alphas.sum())
+    times = simulate_hawkes_multiexp(mu, alphas, betas, t_end, seed=42)
+
+    result = baseline_drift_control(times, t_end, n_blocks=8)
+
+    assert result["n_k1"] < 0.5, f"n_k1={result['n_k1']}"
+    assert abs(result["n_k2"] - true_n) < 0.06, f"n_k2={result['n_k2']}, true_n={true_n}"
+    assert result["dll_pw"] >= -1e-6, f"nesting violated: {result}"
+    assert result["verdict"] != "drift", f"result={result}"
+    # Not asserted: verdict == "long_memory_candidate". When K=1 is misspecified (true
+    # long memory) the block-level LR statistic is inflated, so an honest outcome here
+    # may be "inconclusive"; the method only guarantees it is not called drift.
+    assert result["dll_pw"] < 0.5 * result["dll_k2"], f"result={result}"

@@ -1013,6 +1013,342 @@ def spurious_delta21_null(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class PiecewiseMuFit:
+    """Result of `fit_hawkes_exp_piecewise_mu`.
+
+    `mus` holds one baseline rate per equal-width time block (length
+    `n_blocks`); `alpha`/`beta` are the single-exponential kernel's
+    branching ratio and decay rate, shared across all blocks. `n` is an
+    alias for `alpha` (the branching ratio, matching `HawkesFit`/
+    `MultiExpFit`'s convention of exposing `n` alongside the raw kernel
+    parameter it equals for a single component).
+
+    `converged` carries the SAME caveat as `HawkesFit.converged` and
+    `MultiExpFit.converged`: it reflects only that the winning multi-start's
+    Nelder-Mead simplex stopped spreading out in log-likelihood (tol=1e-6),
+    not that (mus, alpha, beta) are individually well identified. This is
+    *more* exposed to the near-critical mu/alpha ridge than the single-mu
+    case, since a block with few events can trade its own mu_b off against
+    alpha along a shallow direction; treat individual `mus` entries as
+    noisier than the shared `alpha`.
+    """
+
+    mus: np.ndarray
+    alpha: float
+    beta: float
+    n: float
+    loglik: float
+    converged: bool
+    n_blocks: int
+
+
+def _block_index(times: np.ndarray, t_end: float, n_blocks: int) -> np.ndarray:
+    """Map each event time to its equal-width block index in [0, n_blocks)."""
+    block_width = t_end / n_blocks
+    idx = np.floor(times / block_width).astype(np.int64)
+    return np.clip(idx, 0, n_blocks - 1)
+
+
+def _block_widths(t_end: float, n_blocks: int) -> np.ndarray:
+    """Widths |block_b| for each of n_blocks equal-width blocks covering [0, t_end]."""
+    block_width = t_end / n_blocks
+    return np.full(n_blocks, block_width, dtype=np.float64)
+
+
+def hawkes_piecewise_mu_loglik(
+    times: np.ndarray, t_end: float, mus: np.ndarray, alpha: float, beta: float, n_blocks: int
+) -> float:
+    """Exact log-likelihood for a single-exponential kernel with a block-wise
+    constant baseline mu_b(t) = mus[b(t)], b(t) the index of t's equal-width
+    time block.
+
+    loglik = Σ_i log(mu_{b(t_i)} + alpha*beta*R_i)
+             - Σ_b mu_b*|block_b|
+             - alpha*Σ_i (1 - exp(-beta*(T-t_i)))
+
+    The excitation recursion R_i and the excitation compensator term are
+    exactly `hawkes_loglik`'s (the kernel does not know about blocks at
+    all — only the baseline is block-wise). The baseline compensator
+    Σ_b mu_b*|block_b| replaces the single mu*T term: since blocks are
+    disjoint and cover [0, T] exactly, this is ∫_0^T mu(t) dt for the
+    piecewise-constant mu(t).
+    """
+    n_events = times.size
+    if mus.size != n_blocks:
+        raise ValueError(f"mus must have length n_blocks={n_blocks}; got {mus.size}")
+
+    if n_events == 0:
+        widths = _block_widths(t_end, n_blocks)
+        return float(-np.sum(mus * widths))
+
+    if np.any(mus <= 0.0) or alpha < 0.0 or alpha >= 1.0 or beta <= 0.0:
+        return -np.inf
+
+    block_idx = _block_index(times, t_end, n_blocks)
+    mu_at_event = mus[block_idx]
+
+    dt = np.diff(times)
+    decay = np.exp(-beta * dt)
+    r = _excitation_recursion(decay)
+
+    intensities = mu_at_event + alpha * beta * r
+    if np.any(intensities <= 0.0):
+        return -np.inf
+
+    log_sum = np.sum(np.log(intensities))
+    widths = _block_widths(t_end, n_blocks)
+    compensator_baseline = float(np.sum(mus * widths))
+    compensator_excitation = alpha * np.sum(1.0 - np.exp(-beta * (t_end - times)))
+
+    return float(log_sum - compensator_baseline - compensator_excitation)
+
+
+def _neg_piecewise_loglik_transformed(
+    params: np.ndarray, times: np.ndarray, t_end: float, n_blocks: int
+) -> float:
+    """Negative log-likelihood as a function of unconstrained
+    (log mu_1..log mu_B, logit alpha, log beta)."""
+    log_mus = params[:n_blocks]
+    logit_alpha = params[n_blocks]
+    log_beta = params[n_blocks + 1]
+
+    mus = np.exp(log_mus)
+    alpha = float(1.0 / (1.0 + np.exp(-logit_alpha)))
+    beta = float(np.exp(log_beta))
+
+    ll = hawkes_piecewise_mu_loglik(times, t_end, mus, alpha, beta, n_blocks)
+    if not np.isfinite(ll):
+        return 1e18
+    return -ll
+
+
+MAX_PIECEWISE_BLOCKS = 12
+
+PIECEWISE_MAX_ITER = 1500
+
+# chi-square 0.95 quantiles for df = 1..11 (standard table values, e.g.
+# NIST/SEMATECH e-Handbook of Statistical Methods, upper-tail critical values
+# of the chi-square distribution at alpha=0.05). Hard-coded to avoid a scipy
+# dependency; df = n_blocks - 1 and n_blocks <= MAX_PIECEWISE_BLOCKS = 12.
+_CHI2_95 = {
+    1: 3.841,
+    2: 5.991,
+    3: 7.815,
+    4: 9.488,
+    5: 11.070,
+    6: 12.592,
+    7: 14.067,
+    8: 15.507,
+    9: 16.919,
+    10: 18.307,
+    11: 19.675,
+}
+
+# Minimum K=1 -> K=2 branching-ratio rise before the verdict looks at the
+# piecewise evidence at all.
+DRIFT_K2_RISE_MIN = 0.1
+
+
+def fit_hawkes_exp_piecewise_mu(
+    times: np.ndarray, t_end: float, n_blocks: int, fit_k1: HawkesFit | None = None
+) -> PiecewiseMuFit:
+    """MLE of (mu_1..mu_B, alpha, beta) for a single-exponential-kernel Hawkes
+    process with a block-wise constant baseline: the CONTROL described in
+    `fit_hawkes_multiexp`'s "THE CONTROL" section. It re-fits K=1 but lets the
+    baseline take one free value per equal-width time block of [0, t_end]
+    instead of a single constant mu. See `baseline_drift_control` for how it
+    is paired with the K=1 and K=2 fits.
+
+    Time-axis assumption: event times lie in [0, t_end]; block b covers
+    [b*t_end/B, (b+1)*t_end/B) (the last block is closed at t_end).
+
+    Optimizes over B+2 unconstrained parameters (log mu_1..log mu_B, logit
+    alpha, log beta) with the module's hand-rolled Nelder-Mead. Two starts:
+      1. the constant-mu K=1 solution (`fit_hawkes_exp`; every mu_b = mu-hat,
+         alpha-hat, beta-hat). Because the constant-mu model is nested in
+         this one and Nelder-Mead never returns a point worse than its
+         starting vertex, `loglik >= fit_k1.loglik` (up to floating-point
+         noise), which is what the likelihood-ratio verdict in
+         `baseline_drift_control` relies on.
+      2. the empirical per-block event rates scaled by (1 - alpha-hat), with
+         the K=1 alpha-hat, beta-hat, so the baseline starts block-shaped.
+    The better of the two is returned. Pass `fit_k1` to reuse an existing
+    K=1 fit instead of recomputing it.
+
+    `n_blocks` is capped at `MAX_PIECEWISE_BLOCKS` (12) because every block
+    adds a dimension to the simplex search and, at the sample sizes this
+    module targets, too many blocks leave too few events per block to
+    identify mu_b.
+
+    CAVEAT on `converged`: same as `HawkesFit.converged`; it says only that
+    the winning simplex stopped spreading in log-likelihood. It does not
+    certify that every mu_b is individually identified (a block with few
+    events has a nearly flat likelihood in its own mu_b), and with up to 14
+    dimensions the optimizer may also stop at max_iter; treat per-block mus
+    as noisier than the shared alpha.
+    """
+    if t_end <= 0.0:
+        raise ValueError("t_end must be positive")
+    if n_blocks < 1:
+        raise ValueError(f"n_blocks must be >= 1; got {n_blocks}")
+    if n_blocks > MAX_PIECEWISE_BLOCKS:
+        raise ValueError(f"n_blocks must be <= {MAX_PIECEWISE_BLOCKS}; got {n_blocks}")
+    if times.size < 2:
+        raise ValueError("need at least 2 events to fit")
+
+    if fit_k1 is None:
+        fit_k1 = fit_hawkes_exp(times, t_end)
+
+    block_idx = _block_index(times, t_end, n_blocks)
+    block_widths = _block_widths(t_end, n_blocks)
+    block_counts = np.bincount(block_idx, minlength=n_blocks).astype(np.float64)
+    # Empirical per-block rate, floored well above zero so an empty block
+    # still gets a sane (small but positive) starting mu instead of log(0).
+    global_rate = times.size / t_end
+    empirical_block_rates = np.where(
+        block_counts > 0.0, block_counts / block_widths, 0.1 * global_rate
+    )
+
+    alpha_seed = float(np.clip(fit_k1.alpha, 1e-6, 1.0 - 1e-6))
+    tail = [np.log(alpha_seed / (1.0 - alpha_seed)), np.log(fit_k1.beta)]
+    starts = [
+        np.concatenate([np.full(n_blocks, np.log(fit_k1.mu)), tail]),
+        np.concatenate([np.log(empirical_block_rates * (1.0 - alpha_seed)), tail]),
+    ]
+
+    best_params: np.ndarray | None = None
+    best_ll = -np.inf
+    best_converged = False
+
+    for x0 in starts:
+        best_x, best_f, converged = _nelder_mead(
+            lambda p: _neg_piecewise_loglik_transformed(p, times, t_end, n_blocks),
+            x0,
+            max_iter=PIECEWISE_MAX_ITER,
+        )
+        ll = -best_f
+        if ll > best_ll:
+            best_ll = ll
+            best_params = best_x
+            best_converged = converged
+
+    assert best_params is not None
+    mus = np.exp(best_params[:n_blocks])
+    alpha = float(1.0 / (1.0 + np.exp(-best_params[n_blocks])))
+    beta = float(np.exp(best_params[n_blocks + 1]))
+
+    return PiecewiseMuFit(
+        mus=mus,
+        alpha=alpha,
+        beta=beta,
+        n=alpha,
+        loglik=best_ll,
+        converged=best_converged,
+        n_blocks=n_blocks,
+    )
+
+
+def _drift_verdict(k2_rise: float, dll_pw: float, dll_k2: float, n_blocks: int) -> str:
+    """Label a K=1 -> K=2 rise as 'drift', 'long_memory_candidate' or
+    'inconclusive' from log-likelihood gains over the constant-mu K=1 fit.
+
+    `dll_pw` is the gain from the block-wise baseline, `dll_k2` the gain from
+    the second kernel component, `n_blocks` the number of baseline blocks.
+    With threshold = chi2_0.95(n_blocks - 1) / 2 (the classical LR-test
+    cutoff for B-1 extra free parameters, halved because the statistic is
+    2*dll):
+      - k2_rise <= DRIFT_K2_RISE_MIN: 'inconclusive' (nothing to explain).
+      - dll_pw >= max(threshold, 0.5 * dll_k2): 'drift' (the block baseline
+        is significant and buys at least half of what the extra kernel
+        component buys).
+      - dll_pw < threshold: 'long_memory_candidate' (a flexible baseline does
+        not help significantly).
+      - otherwise 'inconclusive' (significant but under half of dll_k2).
+    """
+    if n_blocks < 2 or n_blocks > MAX_PIECEWISE_BLOCKS:
+        raise ValueError(f"n_blocks must be in [2, {MAX_PIECEWISE_BLOCKS}]; got {n_blocks}")
+    if k2_rise <= DRIFT_K2_RISE_MIN:
+        return "inconclusive"
+    threshold = _CHI2_95[n_blocks - 1] / 2.0
+    if dll_pw >= max(threshold, 0.5 * dll_k2):
+        return "drift"
+    if dll_pw < threshold:
+        return "long_memory_candidate"
+    return "inconclusive"
+
+
+def baseline_drift_control(
+    times: np.ndarray,
+    t_end: float,
+    n_blocks: int = 8,
+    fit_k1: HawkesFit | None = None,
+    fit_k2: MultiExpFit | None = None,
+) -> dict:
+    """Compare constant-mu K=1, K=2, and block-wise-baseline K=1 fits to flag
+    whether a K=1 -> K=2 branching-ratio rise looks like baseline drift or a
+    candidate for genuine long memory.
+
+    Event times are assumed to lie in [0, t_end]. `fit_k1` / `fit_k2` may be
+    passed to reuse precomputed fits (they must be fits of the same `times`
+    and `t_end`).
+
+    Returned keys: n_k1, n_k2, n_k1_piecewise, slow_beta_k2 (smaller beta of
+    the K=2 fit), dll_pw = piecewise.loglik - fit_k1.loglik, dll_k2 =
+    fit_k2.loglik - fit_k1.loglik, dll_threshold = chi2_0.95(n_blocks-1)/2,
+    and verdict (see `_drift_verdict` for the rule).
+
+    The verdict is a HEURISTIC likelihood-ratio screen, not a formal test:
+    the K=2 and block-wise fits are found by Nelder-Mead and may not reach
+    the global optimum, the chi-square calibration assumes standard
+    likelihood-ratio asymptotics that Hawkes likelihoods only approximately
+    satisfy, and the "at least half of dll_k2" cut-off is a convention, not
+    derived. When the K=1 model is misspecified (genuine long memory), block
+    counts are more dispersed than K=1 predicts, which inflates dll_pw; a
+    long-memory process can therefore land on "inconclusive" rather than
+    "long_memory_candidate". Only "drift" requires dll_pw to be comparable
+    to the K=2 gain, so the screen is conservative about labelling drift.
+
+    RESOLUTION LIMIT: a block-wise constant baseline can absorb only drift
+    that is SLOWER than the block width t_end / n_blocks. Faster baseline
+    oscillations average out inside each block and look like stationary
+    noise, so they remain indistinguishable from long memory and will be
+    labelled 'long_memory_candidate'. The caller must choose n_blocks
+    (<= MAX_PIECEWISE_BLOCKS) so that the block width is below the suspected
+    drift timescale; a 'long_memory_candidate' verdict carries no meaning if
+    that condition fails.
+    """
+    if t_end <= 0.0:
+        raise ValueError("t_end must be positive")
+    if n_blocks < 1 or n_blocks > MAX_PIECEWISE_BLOCKS:
+        raise ValueError(f"n_blocks must be in [1, {MAX_PIECEWISE_BLOCKS}]; got {n_blocks}")
+    if n_blocks < 2:
+        raise ValueError("n_blocks must be >= 2 for the likelihood-ratio verdict")
+
+    if fit_k1 is None:
+        fit_k1 = fit_hawkes_exp(times, t_end)
+    if fit_k2 is None:
+        fit_k2 = fit_hawkes_multiexp(times, t_end, K=2)
+    fit_piecewise = fit_hawkes_exp_piecewise_mu(times, t_end, n_blocks, fit_k1=fit_k1)
+
+    n_k1 = fit_k1.alpha
+    n_k2 = fit_k2.n
+    dll_pw = fit_piecewise.loglik - fit_k1.loglik
+    dll_k2 = fit_k2.loglik - fit_k1.loglik
+    k2_rise = n_k2 - n_k1
+
+    return {
+        "n_k1": n_k1,
+        "n_k2": n_k2,
+        "n_k1_piecewise": fit_piecewise.alpha,
+        "slow_beta_k2": float(np.min(fit_k2.betas)),
+        "dll_pw": dll_pw,
+        "dll_k2": dll_k2,
+        "dll_threshold": _CHI2_95[n_blocks - 1] / 2.0,
+        "verdict": _drift_verdict(k2_rise, dll_pw, dll_k2, n_blocks),
+    }
+
+
 def branching_count_variance(times: np.ndarray, window: float, t_end: float) -> float:
     """Model-free branching-ratio estimate from count mean/variance alone.
 

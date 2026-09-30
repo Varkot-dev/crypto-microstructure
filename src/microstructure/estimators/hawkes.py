@@ -1300,9 +1300,14 @@ def baseline_drift_control(
 
     The verdict is a HEURISTIC likelihood-ratio screen, not a formal test:
     the K=2 and block-wise fits are found by Nelder-Mead and may not reach
-    the global optimum, the chi-square calibration presumes independent
-    regularity that Hawkes likelihoods only approximately satisfy, and the
-    "at least half of dll_k2" cut-off is a convention, not derived.
+    the global optimum, the chi-square calibration assumes standard
+    likelihood-ratio asymptotics that Hawkes likelihoods only approximately
+    satisfy, and the "at least half of dll_k2" cut-off is a convention, not
+    derived. When the K=1 model is misspecified (genuine long memory), block
+    counts are more dispersed than K=1 predicts, which inflates dll_pw; a
+    long-memory process can therefore land on "inconclusive" rather than
+    "long_memory_candidate". Only "drift" requires dll_pw to be comparable
+    to the K=2 gain, so the screen is conservative about labelling drift.
 
     RESOLUTION LIMIT: a block-wise constant baseline can absorb only drift
     that is SLOWER than the block width t_end / n_blocks. Faster baseline

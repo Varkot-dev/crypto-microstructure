@@ -871,4 +871,7 @@ def test_baseline_drift_control_on_two_exp_process_is_not_drift():
     assert abs(result["n_k2"] - true_n) < 0.06, f"n_k2={result['n_k2']}, true_n={true_n}"
     assert result["dll_pw"] >= -1e-6, f"nesting violated: {result}"
     assert result["verdict"] != "drift", f"result={result}"
-    assert result["verdict"] == "long_memory_candidate", f"result={result}"
+    # Not asserted: verdict == "long_memory_candidate". When K=1 is misspecified (true
+    # long memory) the block-level LR statistic is inflated, so an honest outcome here
+    # may be "inconclusive"; the method only guarantees it is not called drift.
+    assert result["dll_pw"] < 0.5 * result["dll_k2"], f"result={result}"

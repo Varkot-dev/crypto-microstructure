@@ -668,7 +668,10 @@ def test_kernel_mode_shift_is_reported_alongside_alpha(tmp_path: Path) -> None:
     assert base["fast_mode_fraction"] == 0.0
     assert reg["fast_mode_fraction"] == 0.75
     assert reg["alpha_cv_median"] == pytest.approx(0.36)
+    assert base["alpha_median_slow_mode"] == pytest.approx(0.7)
+    assert reg["alpha_median_slow_mode"] == pytest.approx(0.35)
     report = (out_dir / "q8_regimes.md").read_text()
     assert "fast-mode share" in report
+    assert "slow-mode fits" in report
     assert "Kernel-mode shift" in report
     assert "2024-07" in report.split("Kernel-mode shift")[1]

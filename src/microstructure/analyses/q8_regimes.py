@@ -580,6 +580,8 @@ def _regime_summary(q4: dict, q6: dict | None, *, universe: str = "fixed") -> di
         summary["fast_mode_fraction"] = (
             float(np.mean(beta_vals > FAST_MODE_BETA)) if beta_vals.size else None
         )
+        slow_alpha = alpha_vals[beta_vals <= FAST_MODE_BETA] if beta_vals.size else np.array([])
+        summary["alpha_median_slow_mode"] = float(np.median(slow_alpha)) if slow_alpha.size else None
     else:
         summary["alpha_law"] = None
         summary["alpha_law_mismatch_warning"] = None
@@ -587,6 +589,7 @@ def _regime_summary(q4: dict, q6: dict | None, *, universe: str = "fixed") -> di
         summary["alpha_iqr"] = None
         summary["alpha_cv_median"] = None
         summary["fast_mode_fraction"] = None
+        summary["alpha_median_slow_mode"] = None
 
     return summary
 
@@ -619,8 +622,9 @@ def _kernel_mode_lines(
         f"fit has β̂ > {FAST_MODE_BETA:g} (decay faster than {1 / FAST_MODE_BETA:g} business-time "
         f"seconds); in the baseline ({baseline_label}) it is {base_fast:.2f}. A fit in the fast mode "
         "captures only the fast component of a multi-timescale kernel, so its α̂ is lower by "
-        "construction. Compare these regimes on the count-variance n̂_CV column instead, which "
-        "assumes no kernel shape."
+        "construction. Compare these regimes on the slow-mode α median (fits with β̂ ≤ "
+        f"{FAST_MODE_BETA:g} only) or on the count-variance n̂_CV column, which assumes no "
+        "kernel shape."
         ),
         "",
     ]
@@ -846,9 +850,10 @@ def _write_md(
     lines.append("")
     lines.append(
         "| regime | universe | n_success | flip slope | flip R² | γ slope | γ R² | γ median (IQR) | "
-        "p_flip median | anti-persistent | α median (IQR) | n̂_CV median | fast-mode share |"
+        "p_flip median | anti-persistent | α median (IQR) | α median, slow-mode fits | n̂_CV median | "
+        "fast-mode share |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
     def _row(label: str, s: dict) -> str:
         flip = s["flip_law"]
@@ -866,10 +871,15 @@ def _write_md(
         )
         cv_med = f"{s['alpha_cv_median']:.4f}" if s.get("alpha_cv_median") is not None else "n/a"
         fast = f"{s['fast_mode_fraction']:.2f}" if s.get("fast_mode_fraction") is not None else "n/a"
+        slow = (
+            f"{s['alpha_median_slow_mode']:.4f}"
+            if s.get("alpha_median_slow_mode") is not None
+            else "n/a"
+        )
         return (
             f"| {label} | {s['universe']} | {s['n_success']} | {flip_slope} | {flip_r2} | {gamma_slope} | "
             f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} | "
-            f"{cv_med} | {fast} |"
+            f"{slow} | {cv_med} | {fast} |"
         )
 
     lines.append(_row(baseline_label, baseline_summary))

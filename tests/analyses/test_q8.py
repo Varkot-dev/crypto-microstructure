@@ -94,7 +94,13 @@ def _write_q4_json(
     (out_dir / "q4_cross_section.json").write_text(json.dumps(payload, indent=2))
 
 
-def _write_q6_json(out_dir: Path, month: str, alpha_by_symbol: dict[str, float], n_events_by_symbol: dict[str, int]) -> None:
+def _write_q6_json(
+    out_dir: Path,
+    month: str,
+    alpha_by_symbol: dict[str, float],
+    n_events_by_symbol: dict[str, int],
+    beta_by_symbol: dict[str, float] | None = None,
+) -> None:
     records = [
         {
             "symbol": sym,
@@ -106,7 +112,7 @@ def _write_q6_json(out_dir: Path, month: str, alpha_by_symbol: dict[str, float],
             "alpha_cv": alpha + 0.01,
             "raw_delta": 0.001,
             "raw_alpha_window1": alpha,
-            "median_beta": 2.0,
+            "median_beta": (beta_by_symbol or {}).get(sym, 2.0),
             "median_mu": 1.0,
             "count_variance_window_bt": 200.0,
         }
@@ -628,3 +634,41 @@ def test_run_q8_regimes_rendered_in_chronological_order(tmp_path: Path):
     i_2025 = md_text.index("2025-07")
     i_2026 = md_text.index("2026-07")
     assert i_baseline < i_2024 < i_2025 < i_2026
+
+
+def test_kernel_mode_shift_is_reported_alongside_alpha(tmp_path: Path) -> None:
+    """An alpha drop driven by fits locking onto a fast (beta > 10) mode must be flagged.
+
+    Baseline: all slow-mode fits. Regime: 3/4 fits in the fast mode, alpha
+    roughly halved, count-variance n-hat unchanged. Q8 must surface the
+    fast-mode share and the count-variance median so the alpha drop is not
+    read as an endogeneity drop.
+    """
+    syms = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+    n_ev = {s: 10 ** (6 + i) for i, s in enumerate(syms)}
+    base_dir, reg_dir, out_dir = tmp_path / "base", tmp_path / "reg", tmp_path / "out"
+    for d in (base_dir, reg_dir, out_dir):
+        d.mkdir()
+    q4_records = [_q4_record(s, n_ev[s], 0.6, 0.5) for s in syms]
+    _write_q4_json(base_dir, "2023-06", q4_records)
+    _write_q4_json(reg_dir, "2024-07", q4_records)
+    _write_q6_json(base_dir, "2023-06", {s: 0.7 for s in syms}, n_ev, {s: 1.0 for s in syms})
+    _write_q6_json(
+        reg_dir,
+        "2024-07",
+        {s: 0.35 for s in syms},
+        n_ev,
+        {"AAAUSDT": 50.0, "BBBUSDT": 80.0, "CCCUSDT": 40.0, "DDDUSDT": 1.0},
+    )
+
+    result = run_q8(out_dir, baseline_dir=base_dir, regime_dirs={"2024-07": reg_dir})
+
+    base = result["baseline_summary"]
+    reg = result["regime_summaries"]["2024-07"]
+    assert base["fast_mode_fraction"] == 0.0
+    assert reg["fast_mode_fraction"] == 0.75
+    assert reg["alpha_cv_median"] == pytest.approx(0.36)
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "fast-mode share" in report
+    assert "Kernel-mode shift" in report
+    assert "2024-07" in report.split("Kernel-mode shift")[1]

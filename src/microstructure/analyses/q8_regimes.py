@@ -66,6 +66,15 @@ REGRESSION_MISMATCH_TOL = 1e-6
 # own findings language for a weak/no relationship.
 GAMMA_FLAT_R2_THRESHOLD = 0.05
 
+# Kernel-mode split for Q6's single-exponential Hawkes fits. A fitted decay
+# rate above this (1/beta < 0.1 business-time seconds) means the MLE locked
+# onto the fast component of a multi-timescale kernel, which captures only
+# part of the excitation and so understates alpha. A regime whose fast-mode
+# share moves this far from the baseline's has an alpha median that is not
+# comparable to the baseline's as a measure of endogeneity.
+FAST_MODE_BETA = 10.0
+FAST_MODE_SHIFT_FLAG = 0.2
+
 
 def _chrono_key(label: str) -> tuple:
     """Sort key for a regime label: (YYYY, MM) parsed from a leading YYYY-MM
@@ -565,13 +574,56 @@ def _regime_summary(q4: dict, q6: dict | None, *, universe: str = "fixed") -> di
             if alpha_vals.size
             else None
         )
+        cv_vals = np.array([r["alpha_cv"] for r in q6_records]) if q6_records else np.array([])
+        beta_vals = np.array([r["median_beta"] for r in q6_records]) if q6_records else np.array([])
+        summary["alpha_cv_median"] = float(np.median(cv_vals)) if cv_vals.size else None
+        summary["fast_mode_fraction"] = (
+            float(np.mean(beta_vals > FAST_MODE_BETA)) if beta_vals.size else None
+        )
     else:
         summary["alpha_law"] = None
         summary["alpha_law_mismatch_warning"] = None
         summary["alpha_median"] = None
         summary["alpha_iqr"] = None
+        summary["alpha_cv_median"] = None
+        summary["fast_mode_fraction"] = None
 
     return summary
+
+
+def _kernel_mode_lines(
+    baseline_label: str,
+    baseline_summary: dict,
+    regime_summaries: dict[str, dict],
+    ordered_regime_labels: list[str],
+) -> list[str]:
+    """Flag regimes whose alpha median moved because the exp-kernel fits changed mode."""
+    base_fast = baseline_summary.get("fast_mode_fraction")
+    if base_fast is None:
+        return []
+    shifted = [
+        label
+        for label in ordered_regime_labels
+        if regime_summaries[label].get("fast_mode_fraction") is not None
+        and abs(regime_summaries[label]["fast_mode_fraction"] - base_fast) > FAST_MODE_SHIFT_FLAG
+    ]
+    if not shifted:
+        return []
+    details = ", ".join(
+        f"{label} ({regime_summaries[label]['fast_mode_fraction']:.2f})" for label in shifted
+    )
+    return [
+        (
+            "**Kernel-mode shift — do not read the α median as an endogeneity change for: "
+        f"{details}.** The fast-mode share is the fraction of symbols whose single-exponential "
+        f"fit has β̂ > {FAST_MODE_BETA:g} (decay faster than {1 / FAST_MODE_BETA:g} business-time "
+        f"seconds); in the baseline ({baseline_label}) it is {base_fast:.2f}. A fit in the fast mode "
+        "captures only the fast component of a multi-timescale kernel, so its α̂ is lower by "
+        "construction. Compare these regimes on the count-variance n̂_CV column instead, which "
+        "assumes no kernel shape."
+        ),
+        "",
+    ]
 
 
 def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) -> dict:
@@ -794,9 +846,9 @@ def _write_md(
     lines.append("")
     lines.append(
         "| regime | universe | n_success | flip slope | flip R² | γ slope | γ R² | γ median (IQR) | "
-        "p_flip median | anti-persistent | α median (IQR) |"
+        "p_flip median | anti-persistent | α median (IQR) | n̂_CV median | fast-mode share |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
     def _row(label: str, s: dict) -> str:
         flip = s["flip_law"]
@@ -812,15 +864,19 @@ def _write_md(
         alpha_med = (
             f"{s['alpha_median']:.4f} ({s['alpha_iqr']:.4f})" if s["alpha_median"] is not None else "n/a"
         )
+        cv_med = f"{s['alpha_cv_median']:.4f}" if s.get("alpha_cv_median") is not None else "n/a"
+        fast = f"{s['fast_mode_fraction']:.2f}" if s.get("fast_mode_fraction") is not None else "n/a"
         return (
             f"| {label} | {s['universe']} | {s['n_success']} | {flip_slope} | {flip_r2} | {gamma_slope} | "
-            f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} |"
+            f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} | "
+            f"{cv_med} | {fast} |"
         )
 
     lines.append(_row(baseline_label, baseline_summary))
     for label in ordered_regime_labels:
         lines.append(_row(label, regime_summaries[label]))
     lines.append("")
+    lines.extend(_kernel_mode_lines(baseline_label, baseline_summary, regime_summaries, ordered_regime_labels))
 
     warnings = []
     ordered_labels_with_baseline = ["__baseline__", *ordered_regime_labels]

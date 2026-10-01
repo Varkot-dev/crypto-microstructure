@@ -737,3 +737,44 @@ def test_low_r2_but_significant_gamma_slope_is_not_called_flat(tmp_path: Path) -
     report = (out_dir / "q8_regimes.md").read_text()
     assert "weak but nonzero activity dependence" in report
     assert "γ remains flat" not in report
+
+
+def test_native_regime_splits_laws_by_cohort(tmp_path: Path) -> None:
+    """Laws on a native regime are refit separately on the baseline-overlap cohort and new listings.
+
+    Planted: on the 8 overlap symbols the native regime has an exact gamma
+    slope of 0.2 per decade (baseline gamma is flat); the 3 new listings have
+    flat gamma. The cohort split must recover the overlap slope, report the
+    baseline's own law on the same overlap symbols, and keep new listings apart.
+    """
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    records = [
+        _q4_record(sym, N_EVENTS[sym], gamma=0.1 + 0.2 * LOG_N[sym], p_flip=0.45)
+        for sym in NATIVE_OVERLAP_SYMBOLS
+    ]
+    records += [
+        _q4_record(sym, NATIVE_N_EVENTS[sym], gamma=GAMMA_BASE, p_flip=0.45)
+        for sym in NATIVE_NEW_SYMBOLS
+    ]
+    _write_q4_json(native_dir, "2026-07", records)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    cohorts = result["overlap"]["2026-07"]["cohort_laws"]
+    assert cohorts["regime_on_overlap"]["gamma_vs_activity"]["slope"] == pytest.approx(0.2)
+    assert cohorts["regime_on_overlap"]["gamma_vs_activity"]["n"] == 8
+    assert cohorts["baseline_on_overlap"]["p_flip_vs_activity"]["slope"] == pytest.approx(
+        FLIP_SLOPE_BASE
+    )
+    assert cohorts["regime_only"]["gamma_vs_activity"]["slope"] == pytest.approx(0.0, abs=1e-9)
+    assert cohorts["regime_only"]["gamma_vs_activity"]["n"] == 3
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "Cohort split" in report
+    assert "cannot and does not speak to new listings" not in report

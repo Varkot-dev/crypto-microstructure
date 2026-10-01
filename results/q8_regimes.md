@@ -284,6 +284,16 @@ For a regime run on the market's own native universe rather than the baseline's 
 |---|---|---|---|---|---|---|---|
 | 2026-07-native | 121 | 231 | 39 | 82 | 192 | 0.3599 | 0.0172 |
 
+### Cohort split (native-universe regimes)
+
+Both laws refit on three cohorts: the baseline's own data restricted to the symbols present in both periods, this regime's data on those same symbols, and this regime's newly listed symbols alone. A law that changes between the first two rows changed within the same contracts; a law that differs only in the third row is a composition effect. t = slope / OLS stderr.
+
+| regime | cohort | n | flip slope (t) | flip R² | γ slope (t) | γ R² |
+|---|---|---|---|---|---|---|
+| 2026-07-native | 2023-06 data, shared symbols | 39 | +0.0999 (t +4.04) | 0.306 | +0.0335 (t +0.98) | 0.025 |
+| 2026-07-native | this regime, shared symbols | 39 | +0.0307 (t +1.12) | 0.033 | +0.1896 (t +3.56) | 0.256 |
+| 2026-07-native | this regime, new listings | 192 | -0.0023 (t -0.17) | 0.000 | +0.0422 (t +1.32) | 0.009 |
+
 ### Universe accounting (own requested universe, per regime)
 
 Accounts for the **full requested universe of each regime** — the baseline's fixed symbol list for a fixed-universe regime, or that regime's own market-native universe for a native-universe one — across three buckets: successful (passed `min_events`), skipped (downloaded but below `min_events`), and failed (no data to download at all for that period). These three buckets always sum to **that regime's own** requested universe size by construction of the upstream Q4 run — for a native-universe regime this is its own total, not the baseline's.
@@ -311,6 +321,6 @@ Accounts for the **full requested universe of each regime** — the baseline's f
 ## Caveats
 
 - **`min_events` filter shifts membership across regimes**: a symbol's activity level in a given month determines whether it clears the Q4 `min_events` threshold at all, so the 'successful' symbol set is not the same fixed panel across regimes — some non-survivors are genuinely below the activity bar in that regime, not delisted or otherwise absent, and this is reported as such via the skip/failure reason above rather than conflated with true delistings.
-- **The regime universe is fixed to the baseline symbol list**: any symbol newly listed in a later regime but absent from the baseline period is deliberately excluded from every regime's requested universe upstream (Q4/Q6 are run against `results/universe_2023-06.txt`), to keep the panel fixed and comparable across regimes — this survivorship analysis therefore cannot and does not speak to new listings, only to the fate of the original panel.
+- **Fixed and native universes answer different questions**: fixed-universe regimes re-run the baseline's own symbol list (`results/universe_2023-06.txt`), so they track the fate of the original panel and exclude later listings. Native-universe regimes (2026-07-native) include later listings, which differ in composition (new contract types as well as new coins); the cohort split above separates the two. The native universe still applies the same min_events floor and only contains symbols that exist in that period.
 - **Regression stderr/R² inherit Q4/Q6's own heteroskedasticity caveat**: as documented in `q4_cross_section.md` and `q6_endogeneity.md`, per-symbol estimator noise is not uniform across the cross-section, so the OLS regressions recomputed here (same assumptions, same caveat) should be read descriptively, not as formal confidence intervals.
 - **Spearman rho on a possibly small overlap**: rank correlation is only as informative as the overlap size allows; a small `n_overlap` (see the table above) should be weighted accordingly rather than treated as a precise correlation estimate.

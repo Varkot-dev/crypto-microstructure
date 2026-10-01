@@ -497,6 +497,13 @@ def _overlap_comparison(baseline_q4: dict, regime_q4: dict) -> dict:
         "regime_only_symbols": regime_only,
         "p_flip_spearman": p_flip_spearman,
         "gamma_spearman": gamma_spearman,
+        "cohort_laws": {
+            "baseline_on_overlap": _recompute_q4_regressions(base_records),
+            "regime_on_overlap": _recompute_q4_regressions(regime_records),
+            "regime_only": _recompute_q4_regressions(
+                [r for r in regime_q4["symbols"] if r["symbol"] in set(regime_only)]
+            ),
+        },
     }
 
 
@@ -633,6 +640,52 @@ def _kernel_mode_lines(
         ),
         "",
     ]
+
+
+def _fmt_law(reg: dict | None) -> str:
+    if reg is None:
+        return "n/a | n/a"
+    t = reg["slope"] / reg["stderr"] if reg["stderr"] > 0 else float("inf")
+    return f"{reg['slope']:+.4f} (t {t:+.2f}) | {reg['r2']:.3f}"
+
+
+def _cohort_split_lines(
+    baseline_label: str, overlap_by_label: dict[str, dict], ordered_regime_labels: list[str]
+) -> list[str]:
+    """Refit both laws per cohort so a within-symbol change is not confused with composition."""
+    lines = [
+        "### Cohort split (native-universe regimes)",
+        "",
+        (
+            "Both laws refit on three cohorts: the baseline's own data restricted to the symbols "
+            "present in both periods, this regime's data on those same symbols, and this "
+            "regime's newly listed symbols alone. A law that changes between the first two rows "
+            "changed within the same contracts; a law that differs only in the third row is a "
+            "composition effect. t = slope / OLS stderr."
+        ),
+        "",
+        "| regime | cohort | n | flip slope (t) | flip R² | γ slope (t) | γ R² |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    cohort_names = (
+        ("baseline_on_overlap", f"{baseline_label} data, shared symbols"),
+        ("regime_on_overlap", "this regime, shared symbols"),
+        ("regime_only", "this regime, new listings"),
+    )
+    for label in ordered_regime_labels:
+        if label not in overlap_by_label:
+            continue
+        cohorts = overlap_by_label[label]["cohort_laws"]
+        for key, name in cohort_names:
+            laws = cohorts[key]
+            reg = laws["p_flip_vs_activity"] or laws["gamma_vs_activity"]
+            n = reg["n"] if reg else 0
+            lines.append(
+                f"| {label} | {name} | {n} | {_fmt_law(laws['p_flip_vs_activity'])} | "
+                f"{_fmt_law(laws['gamma_vs_activity'])} |"
+            )
+    lines.append("")
+    return lines
 
 
 def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) -> dict:
@@ -1155,6 +1208,7 @@ def _write_md(
                 f"{_fmt_corr(ov['p_flip_spearman'])} | {_fmt_corr(ov['gamma_spearman'])} |"
             )
         lines.append("")
+        lines.extend(_cohort_split_lines(baseline_label, overlap_by_label, ordered_regime_labels))
 
     if universe_accounting_by_label:
         lines.append("### Universe accounting (own requested universe, per regime)")
@@ -1214,14 +1268,25 @@ def _write_md(
         "delisted or otherwise absent, and this is reported as such via the skip/failure "
         "reason above rather than conflated with true delistings."
     )
-    lines.append(
-        "- **The regime universe is fixed to the baseline symbol list**: any symbol newly "
-        "listed in a later regime but absent from the baseline period is deliberately "
-        "excluded from every regime's requested universe upstream (Q4/Q6 are run against "
-        "`results/universe_2023-06.txt`), to keep the panel fixed and comparable across "
-        "regimes — this survivorship analysis therefore cannot and does not speak to new "
-        "listings, only to the fate of the original panel."
-    )
+    if overlap_by_label:
+        lines.append(
+            "- **Fixed and native universes answer different questions**: fixed-universe "
+            "regimes re-run the baseline's own symbol list (`results/universe_2023-06.txt`), "
+            "so they track the fate of the original panel and exclude later listings. "
+            f"Native-universe regimes ({', '.join(sorted(overlap_by_label))}) include later "
+            "listings, which differ in composition (new contract types as well as new coins); "
+            "the cohort split above separates the two. The native universe still applies the "
+            "same min_events floor and only contains symbols that exist in that period."
+        )
+    else:
+        lines.append(
+            "- **The regime universe is fixed to the baseline symbol list**: any symbol newly "
+            "listed in a later regime but absent from the baseline period is deliberately "
+            "excluded from every regime's requested universe upstream (Q4/Q6 are run against "
+            "`results/universe_2023-06.txt`), to keep the panel fixed and comparable across "
+            "regimes — this survivorship analysis therefore cannot and does not speak to new "
+            "listings, only to the fate of the original panel."
+        )
     lines.append(
         "- **Regression stderr/R² inherit Q4/Q6's own heteroskedasticity caveat**: as "
         "documented in `q4_cross_section.md` and `q6_endogeneity.md`, per-symbol estimator "

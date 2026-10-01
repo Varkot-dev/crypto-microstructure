@@ -1145,6 +1145,11 @@ _CHI2_95 = {
     11: 19.675,
 }
 
+# Minimum K=1 -> K=2 log-likelihood gain for the extra kernel component to be
+# taken as evidence at all: K=2 adds 2 free parameters (one alpha, one beta),
+# so the 95% likelihood-ratio cutoff is chi2_0.95(2) / 2.
+K2_GAIN_MIN_DLL = _CHI2_95[2] / 2.0
+
 # Minimum K=1 -> K=2 branching-ratio rise before the verdict looks at the
 # piecewise evidence at all.
 DRIFT_K2_RISE_MIN = 0.1
@@ -1259,6 +1264,9 @@ def _drift_verdict(k2_rise: float, dll_pw: float, dll_k2: float, n_blocks: int) 
     cutoff for B-1 extra free parameters, halved because the statistic is
     2*dll):
       - k2_rise <= DRIFT_K2_RISE_MIN: 'inconclusive' (nothing to explain).
+      - dll_k2 < K2_GAIN_MIN_DLL (= chi2_0.95(2)/2): 'inconclusive' (the
+        second kernel component is not itself significant, so there is no
+        K=2 effect for a baseline or a memory explanation to account for).
       - dll_pw >= max(threshold, 0.5 * dll_k2): 'drift' (the block baseline
         is significant and buys at least half of what the extra kernel
         component buys).
@@ -1269,6 +1277,8 @@ def _drift_verdict(k2_rise: float, dll_pw: float, dll_k2: float, n_blocks: int) 
     if n_blocks < 2 or n_blocks > MAX_PIECEWISE_BLOCKS:
         raise ValueError(f"n_blocks must be in [2, {MAX_PIECEWISE_BLOCKS}]; got {n_blocks}")
     if k2_rise <= DRIFT_K2_RISE_MIN:
+        return "inconclusive"
+    if dll_k2 < K2_GAIN_MIN_DLL:
         return "inconclusive"
     threshold = _CHI2_95[n_blocks - 1] / 2.0
     if dll_pw >= max(threshold, 0.5 * dll_k2):

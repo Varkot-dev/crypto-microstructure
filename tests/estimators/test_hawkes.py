@@ -804,8 +804,13 @@ def test_piecewise_mu_recovers_stationary_process():
         (0.3, 74.9, 150.0, 12, "inconclusive"),  # significant but < half of dll_k2
         (0.3, 0.0, 100.0, 12, "long_memory_candidate"),
         # n_blocks=2 -> df=1 -> threshold = 3.841/2 = 1.9205.
-        (0.3, 1.93, 2.0, 2, "drift"),
-        (0.3, 1.92, 2.0, 2, "long_memory_candidate"),
+        (0.3, 1.93, 3.0, 2, "drift"),
+        (0.3, 1.92, 3.0, 2, "long_memory_candidate"),
+        # K=2 gain itself insignificant (< chi2_0.95(2)/2 = 2.9955): inconclusive,
+        # regardless of the block baseline.
+        (0.3, 0.0, 2.99, 12, "inconclusive"),
+        (0.3, 500.0, 2.0, 12, "inconclusive"),
+        (0.3, 0.0, 3.0, 12, "long_memory_candidate"),  # just above the K=2 cutoff
     ],
 )
 def test_drift_verdict_rule_table(k2_rise, dll_pw, dll_k2, n_blocks, expected):

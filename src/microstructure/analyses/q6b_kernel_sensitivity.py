@@ -717,6 +717,11 @@ def _drift_section_lines(result: dict) -> list[str]:
         "read `inconclusive` instead of `long_memory_candidate`."
     )
     lines.append(
+        "- A verdict is only issued when the K=2 component is itself significant "
+        "(`dll_k2` >= chi2_0.95(2)/2 = 2.996); a K=1 -> K=2 rise in n with no significant "
+        "likelihood gain reads `inconclusive`, not `long_memory_candidate`."
+    )
+    lines.append(
         "- `drift` is the conservative, strong label: it requires the block baseline to be "
         "significant AND to recover at least half of the K=2 gain. Business-time "
         "rescaling has already removed the 48-bin periodic intraday profile, so the control "

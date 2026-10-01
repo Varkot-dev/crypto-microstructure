@@ -38,10 +38,16 @@ import numpy as np
 import polars as pl
 import pytest
 
+from microstructure.analyses import q6b_kernel_sensitivity as q6b
 from microstructure.analyses.q6b_kernel_sensitivity import (
+    _DRIFT_KEYS,
+    DEFAULT_DRIFT_BLOCKS,
     DESEASON_BIN_WIDTH_S,
     DRIFT_SUSPECT_MULTIPLIER,
+    DRIFT_VERDICTS,
+    _drift_headline,
     _is_drift_suspect,
+    _parse_args,
     _symbol_record,
     run_q6b,
 )
@@ -49,6 +55,7 @@ from microstructure.data.catalog import parquet_path
 from microstructure.estimators.hawkes import (
     simulate_hawkes_exp,
     simulate_hawkes_multiexp,
+    simulate_seasonal_hawkes_exp,
     spurious_delta21_null,
 )
 
@@ -110,6 +117,27 @@ DELTA21_NULL_SIMS = 2
 DELTA21_NULL_SLACK = 0.05
 
 
+# Drift-control fixtures. SEASONAL: the 4-level/day baseline used by the
+# estimator's own drift test (test_hawkes.py), pushed through the real Q6b
+# pipeline -- which first rescales to business time with a 48-bin intraday
+# profile. RAMP: a stationary n=0.4 Hawkes thinned by a slow multi-day ramp
+# (keep-probability 0.2 -> 1.0 over 3 days), i.e. APERIODIC drift the
+# time-of-day profile cannot remove. Thinning a simulated Hawkes discards some
+# child events, so the ramp symbol's true n is below 0.4; only the verdict is
+# asserted, not n.
+SEASONAL_MU_BAR = 0.5
+SEASONAL_T_END = 60_000.0
+RAMP_MU, RAMP_DAYS, RAMP_KEEP_LO = 0.25, 3.0, 0.2
+
+
+def _ramp_times() -> np.ndarray:
+    t_end = RAMP_DAYS * 86_400.0
+    base = simulate_hawkes_exp(RAMP_MU, 0.4, 2.0, t_end, seed=11)
+    keep_prob = RAMP_KEEP_LO + (1.0 - RAMP_KEEP_LO) * base / t_end
+    keep = np.random.default_rng(3).random(base.size) < keep_prob
+    return base[keep]
+
+
 def _write_event_times_fixture(
     root: Path, symbol: str, times_s: np.ndarray, month: str = "2023-06",
 ) -> int:
@@ -164,6 +192,16 @@ def planted_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     assert oneexp_times.size > 2 * WINDOWS * 10, "need enough events for a stable 2-window panel"
     _write_event_times_fixture(root, "ONEEXPUSDT", oneexp_times)
 
+    # Drift-control fixtures (see the "drift-vs-memory control" section below).
+    seasonal_times = simulate_seasonal_hawkes_exp(
+        SEASONAL_MU_BAR, 0.4, 2.0, SEASONAL_T_END, np.tile([0.7, 1.3], 2), seed=5
+    )
+    _write_event_times_fixture(root, "SEASONALUSDT", seasonal_times)
+    _write_event_times_fixture(root, "RAMPUSDT", _ramp_times())
+    _write_event_times_fixture(
+        root, "SMALLUSDT", simulate_hawkes_exp(1.0, 0.4, 2.0, 1_500.0, seed=1)
+    )
+
     # MISSINGUSDT deliberately has no parquet on disk -> must land in failures.
     return root
 
@@ -172,7 +210,7 @@ def test_run_q6b_two_timescale_symbol_shows_large_delta21(planted_root: Path):
     out_dir = planted_root / "results_two"
     result = run_q6b(
         planted_root, out_dir, symbols=["TWOEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     assert result["n_symbols_successful"] == 1, result["failures"]
     rec = result["records"][0]
@@ -211,7 +249,7 @@ def test_run_q6b_single_exp_symbol_shows_small_delta21(planted_root: Path):
     out_dir = planted_root / "results_one"
     result = run_q6b(
         planted_root, out_dir, symbols=["ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=DELTA21_NULL_SIMS,
+        windows=WINDOWS, ks=KS, null_sims=DELTA21_NULL_SIMS, drift_blocks=0,
     )
     assert result["n_symbols_successful"] == 1, result["failures"]
     rec = result["records"][0]
@@ -255,7 +293,7 @@ def test_run_q6b_missing_symbol_lands_in_failures(planted_root: Path):
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "MISSINGUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     by_symbol = {r["symbol"]: r for r in result["records"]}
     assert "TWOEXPUSDT" in by_symbol
@@ -272,7 +310,7 @@ def test_run_q6b_never_aborts_on_all_failures(tmp_path: Path):
     out_dir = tmp_path / "results"
     result = run_q6b(
         tmp_path, out_dir, symbols=["GHOSTUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     assert result["records"] == []
     assert len(result["failures"]) == 1
@@ -288,7 +326,7 @@ def test_run_q6b_outputs_exist_and_parquet_row_count_matches_successes(planted_r
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT", "MISSINGUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     assert (out_dir / "q6b_kernel_sensitivity.json").exists()
     assert (out_dir / "q6b_kernel_sensitivity.md").exists()
@@ -322,7 +360,7 @@ def test_run_q6b_cross_section_reports_delta21_distribution_and_frac_near_critic
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     cross = result["cross_section"]
     assert cross["delta21_distribution"] is not None
@@ -351,7 +389,7 @@ def test_run_q6b_correlates_delta21_with_q6_count_variance_gap(planted_root: Pat
     result = run_q6b(
         planted_root, out_dir,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, q6_json=q6_json_path, null_sims=0,
+        windows=WINDOWS, ks=KS, q6_json=q6_json_path, null_sims=0, drift_blocks=0,
     )
     cv_corr = result["cross_section"]["cv_gap_correlation"]
     assert cv_corr is not None
@@ -362,7 +400,7 @@ def test_run_q6b_correlates_delta21_with_q6_count_variance_gap(planted_root: Pat
     result_no_q6 = run_q6b(
         planted_root, out_dir_no_q6,
         symbols=["TWOEXPUSDT", "ONEEXPUSDT"], month="2023-06",
-        windows=WINDOWS, ks=KS, null_sims=0,
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
     )
     assert result_no_q6["cross_section"]["cv_gap_correlation"] is None
     assert result_no_q6["q6_json_used"] is None
@@ -444,10 +482,159 @@ def test_symbol_record_round_trips_through_json_dumps(planted_root: Path):
     type bool is not JSON serializable` (the numpy bool's __class__.__name__
     prints as "bool", which is what made this regression confusing).
     """
-    rec = _symbol_record(planted_root, "ONEEXPUSDT", "2023-06", WINDOWS, KS)
+    rec = _symbol_record(planted_root, "ONEEXPUSDT", "2023-06", WINDOWS, KS, drift_blocks=0)
 
     encoded = json.dumps(rec)  # must not raise; allow_nan=True is the default
     decoded = json.loads(encoded)
     assert decoded["symbol"] == "ONEEXPUSDT"
 
     _assert_only_native_scalars(rec)
+
+
+def test_symbol_record_with_drift_control_round_trips_through_json(planted_root: Path):
+    """Same native-scalar contract with the control ON: the new keys are
+    populated Python-native str/float values (cheap SMALLUSDT fixture)."""
+    rec = _symbol_record(planted_root, "SMALLUSDT", "2023-06", WINDOWS, KS, drift_blocks=6)
+
+    decoded = json.loads(json.dumps(rec))
+    _assert_only_native_scalars(rec)
+    assert all(key in decoded for key in _DRIFT_KEYS)
+    assert "drift_error" not in rec, rec.get("drift_error")
+    assert rec["drift_verdict"] in DRIFT_VERDICTS
+    assert type(rec["drift_verdict"]) is str
+    assert all(type(rec[key]) is float for key in _DRIFT_KEYS if key != "drift_verdict")
+
+
+# --- drift-vs-memory control wiring -----------------------------------------
+
+
+@pytest.fixture(scope="module")
+def drift_panel(planted_root: Path) -> dict:
+    """ONE run_q6b call (control on, default blocks) shared by the tests below
+    so the ~30 s of K=1/K=2/piecewise fits is paid once."""
+    return run_q6b(
+        planted_root, planted_root / "results_drift",
+        symbols=["TWOEXPUSDT", "SEASONALUSDT", "RAMPUSDT"], month="2023-06",
+        windows=WINDOWS, ks=KS, null_sims=0,
+    )
+
+
+def _drift_by_symbol(panel: dict) -> dict[str, dict]:
+    assert panel["n_symbols_successful"] == 3, panel["failures"]
+    return {r["symbol"]: r for r in panel["records"]}
+
+
+def test_drift_control_planted_two_exp_symbol_is_not_drift(drift_panel: dict):
+    rec = _drift_by_symbol(drift_panel)["TWOEXPUSDT"]
+    assert rec["drift_verdict"] in DRIFT_VERDICTS
+    assert rec["drift_verdict"] != "drift", rec
+    assert rec["dll_pw"] < 0.5 * rec["dll_k2"], rec
+
+
+def test_drift_control_business_time_rescaling_absorbs_profile_periodic_drift(
+    drift_panel: dict,
+):
+    """MEASURED on this fixture: the 4-level/day baseline is intraday
+    seasonality, which Q6b's 48-bin business-time rescaling already removes
+    (K=1 n_hat ~= 0.40, the true value; the estimator-level test on RAW time
+    reads 0.46). The control therefore correctly does NOT call it 'drift'. It
+    targets APERIODIC drift (see the ramp test), not profile-periodic drift."""
+    rec = _drift_by_symbol(drift_panel)["SEASONALUSDT"]
+    assert abs(rec["n_median_by_k"][1] - 0.4) < 0.08, rec["n_median_by_k"]
+    assert rec["drift_verdict"] != "drift", rec
+
+
+def test_drift_control_flags_aperiodic_multi_day_ramp_as_drift(drift_panel: dict):
+    rec = _drift_by_symbol(drift_panel)["RAMPUSDT"]
+    assert rec["delta21"] > 0.1, rec
+    assert rec["drift_verdict"] == "drift", rec
+    assert rec["dll_pw"] >= rec["dll_threshold"]
+    assert rec["dll_pw"] >= 0.5 * rec["dll_k2"]
+
+
+def test_drift_control_record_fields_and_cross_section_counts(drift_panel: dict):
+    records = _drift_by_symbol(drift_panel)
+    for rec in records.values():
+        assert all(key in rec for key in _DRIFT_KEYS)
+        assert rec["dll_threshold"] > 0.0
+        assert 0.0 < rec["drift_block_width_s"] < rec["window_length_s"]
+        assert rec["n_k1_piecewise"] > 0.0
+    counts = drift_panel["cross_section"]["drift_verdict_counts"]
+    assert sum(counts.values()) == 3
+    assert counts["not_run"] == 0
+    for verdict in DRIFT_VERDICTS:
+        assert counts[verdict] == sum(r["drift_verdict"] == verdict for r in records.values())
+    assert drift_panel["drift_blocks"] == DEFAULT_DRIFT_BLOCKS
+
+
+def test_drift_control_outputs_json_parquet_and_markdown(drift_panel: dict, planted_root: Path):
+    out_dir = planted_root / "results_drift"
+    # Whole result is JSON-native and round-trips (numpy scalars would raise).
+    _assert_only_native_scalars(drift_panel["records"])
+    _assert_only_native_scalars(drift_panel["cross_section"]["drift_verdict_counts"])
+    loaded = json.loads((out_dir / "q6b_kernel_sensitivity.json").read_text())
+    assert loaded["cross_section"]["drift_verdict_counts"] == (
+        drift_panel["cross_section"]["drift_verdict_counts"]
+    )
+
+    df = pl.read_parquet(out_dir / "q6b_kernel_sensitivity.parquet")
+    assert set(df.columns) >= set(_DRIFT_KEYS)
+    assert sorted(df["drift_verdict"].to_list()) == sorted(
+        r["drift_verdict"] for r in drift_panel["records"]
+    )
+
+    md = (out_dir / "q6b_kernel_sensitivity.md").read_text()
+    assert "## Is the K=2 rise drift or memory?" in md
+    counts = drift_panel["cross_section"]["drift_verdict_counts"]
+    assert f"drift = {counts['drift']}, long_memory_candidate = " in md
+    assert "heuristic likelihood-ratio screen" in md
+    assert "Resolution limit" in md and "hours" in md
+    assert "`inconclusive`" in md and "conservative" in md
+    assert "| drift verdict |" in md
+
+
+def test_drift_blocks_zero_skips_control_cleanly(
+    planted_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("baseline_drift_control must not run when --drift-blocks 0")
+
+    monkeypatch.setattr(q6b, "baseline_drift_control", _boom)
+
+    result = run_q6b(
+        planted_root, tmp_path / "out", symbols=["SMALLUSDT"], month="2023-06",
+        windows=WINDOWS, ks=KS, null_sims=0, drift_blocks=0,
+    )
+    assert result["n_symbols_successful"] == 1, result["failures"]
+    rec = result["records"][0]
+    assert all(rec[key] is None for key in _DRIFT_KEYS)
+    assert result["cross_section"]["drift_verdict_counts"]["not_run"] == 1
+    md = (tmp_path / "out" / "q6b_kernel_sensitivity.md").read_text()
+    assert "--drift-blocks 0" in md
+    df = pl.read_parquet(tmp_path / "out" / "q6b_kernel_sensitivity.parquet")
+    assert df["drift_verdict"].to_list() == [None]
+    json.dumps(result)  # must not raise
+
+
+@pytest.mark.parametrize("bad", [-1, 1, 13])
+def test_run_q6b_rejects_invalid_drift_blocks(tmp_path: Path, bad: int):
+    with pytest.raises(ValueError, match="drift_blocks"):
+        run_q6b(tmp_path, tmp_path / "out", symbols=[], drift_blocks=bad)
+
+
+def test_cli_drift_blocks_flag_default_and_disable(tmp_path: Path):
+    symbols = tmp_path / "s.txt"
+    symbols.write_text("AAAUSDT\n")
+    assert _parse_args(["--symbols-file", str(symbols)]).drift_blocks == 12
+    assert _parse_args(["--symbols-file", str(symbols), "--drift-blocks", "0"]).drift_blocks == 0
+
+
+def test_drift_headline_phrasing_follows_majority():
+    def counts(d: int, m: int, i: int) -> dict[str, int]:
+        return {"drift": d, "long_memory_candidate": m, "inconclusive": i, "not_run": 0}
+
+    assert "mostly slow baseline drift in this window" in _drift_headline(counts(3, 1, 1), 1.0)
+    assert "not explained by drift slower than 2.5 hours" in _drift_headline(counts(0, 3, 1), 2.5)
+    assert "Unresolved" in _drift_headline(counts(2, 2, 1), 1.0)
+    assert "Unresolved" in _drift_headline(counts(2, 2, 0), 1.0)  # ties are not majorities
+    assert "No symbol was assessed" in _drift_headline(counts(0, 0, 0), None)

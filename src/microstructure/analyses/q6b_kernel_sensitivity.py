@@ -47,8 +47,11 @@ the per-symbol output — a large Δ21 on a drift-suspect symbol should be read
 as ambiguous between genuine long-memory and residual non-stationarity, not
 as confirmed endogeneity. The decisive control that WOULD separate the two
 explanations — refitting K=1 with a block-wise (time-varying) mu instead of
-a single constant mu — is out of scope for this module and is named as
-pending in the markdown output, not implemented here.
+a single constant mu — is run per symbol on the FIRST window only (to bound
+cost) via `baseline_drift_control` (see `--drift-blocks`, 0 disables). It is a
+heuristic likelihood-ratio screen whose block baseline can absorb only drift
+slower than the block width; see its docstring and the markdown section
+"Is the K=2 rise drift or memory?".
 
 Symbols are processed one at a time; any per-symbol exception is caught and
 logged into `failures`, and never aborts the run for the remaining symbols.
@@ -69,7 +72,13 @@ import numpy as np
 import polars as pl
 
 from microstructure.data.catalog import parquet_path
-from microstructure.estimators.hawkes import fit_hawkes_multiexp, spurious_delta21_null
+from microstructure.estimators.hawkes import (
+    MAX_PIECEWISE_BLOCKS,
+    baseline_drift_control,
+    fit_hawkes_exp,
+    fit_hawkes_multiexp,
+    spurious_delta21_null,
+)
 from microstructure.signals.eventtime import intraday_rate_profile, rescale_to_business_time
 from microstructure.signals.load import load_events
 
@@ -104,6 +113,28 @@ DRIFT_SUSPECT_MULTIPLIER = 10.0
 
 DEFAULT_KS: tuple[int, ...] = (1, 2, 3)
 
+# Default number of equal-width business-time blocks for the drift-vs-memory
+# control (`baseline_drift_control`). 12 is the estimator's own cap
+# (MAX_PIECEWISE_BLOCKS); 0 disables the control.
+DEFAULT_DRIFT_BLOCKS = 12
+
+DRIFT_VERDICTS: tuple[str, ...] = ("drift", "long_memory_candidate", "inconclusive")
+
+# Per-symbol record keys produced by the drift control (all None when the
+# control is disabled or could not run).
+_DRIFT_KEYS: tuple[str, ...] = (
+    "drift_verdict", "dll_pw", "dll_k2", "dll_threshold", "n_k1_piecewise",
+    "drift_block_width_s",
+)
+
+
+def _cap_events(times: np.ndarray, t_end: float) -> tuple[np.ndarray, float]:
+    """Truncate to the first MAX_FIT_EVENTS events (and the matching t_end)."""
+    if times.size > MAX_FIT_EVENTS:
+        times = times[:MAX_FIT_EVENTS]
+        t_end = float(times[-1])
+    return times, t_end
+
 
 def _fit_capped_multiexp(times: np.ndarray, t_end: float, k: int) -> dict:
     """Fit the K-component sum-of-exponentials Hawkes MLE, capping events.
@@ -114,12 +145,15 @@ def _fit_capped_multiexp(times: np.ndarray, t_end: float, k: int) -> dict:
     (matching the units `times`/`t_end` are already expressed in, since this
     module always calls this AFTER business-time rescaling).
     """
-    if times.size > MAX_FIT_EVENTS:
-        times = times[:MAX_FIT_EVENTS]
-        t_end = float(times[-1])
+    times, t_end = _cap_events(times, t_end)
     fit = fit_hawkes_multiexp(times, t_end, K=k)
     beta_slow = float(np.min(fit.betas))
     return {
+        # Raw fit plus the exact (capped) sample it was fit on, so the drift
+        # control can reuse the K=2 fit. Never copied into the JSON record.
+        "_fit": fit,
+        "_times": times,
+        "_t_end": t_end,
         "n": float(fit.n),
         "alphas": [float(a) for a in fit.alphas],
         "betas": [float(b) for b in fit.betas],
@@ -189,7 +223,41 @@ def _is_drift_suspect(median_inv_beta_slow_k2: float) -> bool:
     return bool(median_inv_beta_slow_k2 > DRIFT_SUSPECT_MULTIPLIER * DESEASON_BIN_WIDTH_S)
 
 
-def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[int, ...]) -> dict:
+def _drift_control_fields(first_window_k2: dict | None, drift_blocks: int) -> dict:
+    """Run `baseline_drift_control` on ONE window (the first) and return
+    Python-native record fields.
+
+    `first_window_k2` is that window's `_fit_capped_multiexp(..., 2)` dict; its
+    K=2 fit is reused and the K=1 fit is computed on the same capped sample.
+    All fields are None when the control is disabled (`drift_blocks == 0`) or
+    K=2 was not fit. A failure inside the control is recorded under
+    `drift_error` rather than discarding the symbol's K-sweep result.
+    """
+    empty = {key: None for key in _DRIFT_KEYS}
+    if drift_blocks == 0 or first_window_k2 is None:
+        return empty
+    times, t_end = first_window_k2["_times"], first_window_k2["_t_end"]
+    try:
+        fit_k1 = fit_hawkes_exp(times, t_end)
+        res = baseline_drift_control(
+            times, t_end, n_blocks=drift_blocks, fit_k1=fit_k1, fit_k2=first_window_k2["_fit"]
+        )
+    except Exception as e:  # noqa: BLE001 - keep the symbol's K-sweep result
+        return {**empty, "drift_error": f"{type(e).__name__}: {e}"}
+    return {
+        "drift_verdict": str(res["verdict"]),
+        "dll_pw": float(res["dll_pw"]),
+        "dll_k2": float(res["dll_k2"]),
+        "dll_threshold": float(res["dll_threshold"]),
+        "n_k1_piecewise": float(res["n_k1_piecewise"]),
+        "drift_block_width_s": float(t_end / drift_blocks),
+    }
+
+
+def _symbol_record(
+    root: Path, symbol: str, month: str, windows: int, ks: tuple[int, ...],
+    drift_blocks: int = DEFAULT_DRIFT_BLOCKS,
+) -> dict:
     events = load_events(root, symbol, [month])
     n_events = events.height
     if n_events == 0:
@@ -246,6 +314,8 @@ def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[
         else float("nan")
     )
 
+    drift_fields = _drift_control_fields(window_fits[0]["per_k"].get(2), drift_blocks)
+
     return {
         "symbol": symbol,
         "n_events": n_events,
@@ -261,6 +331,7 @@ def _symbol_record(root: Path, symbol: str, month: str, windows: int, ks: tuple[
         "ratio_inv_beta_slow_to_bin_width": ratio_bin_width,
         "ratio_inv_beta_slow_to_window_length": ratio_window_length,
         "drift_suspect": drift_suspect,
+        **drift_fields,
         "per_window": [
             {
                 "n_by_k": {k: w["per_k"][k]["n"] for k in ks},
@@ -352,6 +423,16 @@ def _null_floor_p90(records: list[dict], null_sims: int, seed: int = 20240601) -
     }
 
 
+def _drift_verdict_counts(records: list[dict]) -> dict[str, int]:
+    """Count of each drift verdict, plus `not_run` for symbols without one."""
+    counts = {v: 0 for v in DRIFT_VERDICTS}
+    counts["not_run"] = 0
+    for r in records:
+        verdict = r.get("drift_verdict")
+        counts[verdict if verdict in DRIFT_VERDICTS else "not_run"] += 1
+    return counts
+
+
 def _cross_section(
     records: list[dict], q6_gaps: dict[str, float], null_sims: int = 5
 ) -> dict:
@@ -361,6 +442,7 @@ def _cross_section(
             "frac_n2_at_least_0_9": None,
             "cv_gap_correlation": None,
             "null_floor_p90": None,
+            "drift_verdict_counts": _drift_verdict_counts([]),
         }
 
     delta21s = np.array([r["delta21"] for r in records if np.isfinite(r["delta21"])])
@@ -407,6 +489,7 @@ def _cross_section(
         "frac_n2_at_least_0_9": frac_n2_at_least_0_9,
         "cv_gap_correlation": cv_gap_correlation,
         "null_floor_p90": null_floor_p90,
+        "drift_verdict_counts": _drift_verdict_counts(records),
     }
 
 
@@ -419,7 +502,12 @@ def run_q6b(
     ks: tuple[int, ...] = DEFAULT_KS,
     q6_json: Path | None = None,
     null_sims: int = 5,
+    drift_blocks: int = DEFAULT_DRIFT_BLOCKS,
 ) -> dict:
+    if drift_blocks != 0 and not 2 <= drift_blocks <= MAX_PIECEWISE_BLOCKS:
+        raise ValueError(
+            f"drift_blocks must be 0 (disabled) or in [2, {MAX_PIECEWISE_BLOCKS}]; got {drift_blocks}"
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
     failures: list[dict] = []
@@ -430,7 +518,7 @@ def run_q6b(
             failures.append({"symbol": symbol, "reason": f"parquet not found: {p}"})
             continue
         try:
-            records.append(_symbol_record(root, symbol, month, windows, ks))
+            records.append(_symbol_record(root, symbol, month, windows, ks, drift_blocks))
         except Exception as e:  # noqa: BLE001 - per-symbol robustness is the point
             failures.append({"symbol": symbol, "reason": f"{type(e).__name__}: {e}"})
 
@@ -458,6 +546,7 @@ def run_q6b(
         "month": month,
         "windows": windows,
         "ks": list(ks),
+        "drift_blocks": drift_blocks,
         "n_symbols_requested": len(symbols),
         "n_symbols_successful": len(records),
         "n_symbols_failed": len(failures),
@@ -488,6 +577,7 @@ def _parquet_rows(records: list[dict]) -> list[dict]:
             "ratio_inv_beta_slow_to_bin_width": r["ratio_inv_beta_slow_to_bin_width"],
             "ratio_inv_beta_slow_to_window_length": r["ratio_inv_beta_slow_to_window_length"],
             "drift_suspect": r["drift_suspect"],
+            **{key: r.get(key) for key in _DRIFT_KEYS},
         }
         rows.append(row)
     return rows
@@ -498,12 +588,15 @@ _PARQUET_SCHEMA = {
     "n_hat_k2": pl.Float64, "n_hat_k3": pl.Float64, "delta21": pl.Float64,
     "median_inv_beta_slow_k2_s": pl.Float64, "ratio_inv_beta_slow_to_bin_width": pl.Float64,
     "ratio_inv_beta_slow_to_window_length": pl.Float64, "drift_suspect": pl.Boolean,
+    "drift_verdict": pl.Utf8, "dll_pw": pl.Float64, "dll_k2": pl.Float64,
+    "dll_threshold": pl.Float64, "n_k1_piecewise": pl.Float64,
+    "drift_block_width_s": pl.Float64,
 }
 
 
 def _write_results_parquet(out_dir: Path, records: list[dict]) -> None:
     if records:
-        df = pl.DataFrame(_parquet_rows(records))
+        df = pl.DataFrame(_parquet_rows(records), schema=_PARQUET_SCHEMA)
     else:
         df = pl.DataFrame(schema=_PARQUET_SCHEMA)
     df.write_parquet(out_dir / "q6b_kernel_sensitivity.parquet")
@@ -551,6 +644,101 @@ def _fmt_ratio(ratio: float) -> str:
     if not np.isfinite(ratio):
         return "n/a"
     return f"{ratio:.2f}x"
+
+
+def _drift_headline(counts: dict[str, int], width_hours: float | None) -> str:
+    """One-sentence headline from verdict counts (majority of ASSESSED symbols)."""
+    assessed = sum(counts[v] for v in DRIFT_VERDICTS)
+    if assessed == 0:
+        return "No symbol was assessed, so nothing can be said about drift versus memory."
+    if counts["drift"] * 2 > assessed:
+        return (
+            "**The apparent near-criticality is mostly slow baseline drift in this "
+            "window.**"
+        )
+    if counts["long_memory_candidate"] * 2 > assessed:
+        width = f"{width_hours:.1f} hours" if width_hours is not None else "the block width"
+        return f"**The K=2 rise is not explained by drift slower than {width}.**"
+    return "**Unresolved: no verdict holds a majority of the assessed symbols.**"
+
+
+def _drift_section_lines(result: dict) -> list[str]:
+    """Markdown for 'Is the K=2 rise drift or memory?', templated from data."""
+    lines = ["## Is the K=2 rise drift or memory?", ""]
+    drift_blocks = result.get("drift_blocks", 0)
+    if not drift_blocks:
+        lines.append(
+            "The block-wise-baseline control was disabled for this run (`--drift-blocks 0`); "
+            "the K=1→K=2 rise is therefore not separated into drift and memory here."
+        )
+        lines.append("")
+        return lines
+
+    records = result["records"]
+    counts = result["cross_section"]["drift_verdict_counts"]
+    assessed = [r for r in records if r.get("drift_verdict") in DRIFT_VERDICTS]
+    widths = [r["drift_block_width_s"] for r in assessed if r.get("drift_block_width_s")]
+    width_s = float(np.median(widths)) if widths else None
+    width_hours = width_s / 3600.0 if width_s is not None else None
+
+    lines.append(_drift_headline(counts, width_hours))
+    lines.append("")
+    lines.append(
+        f"Verdict counts over {len(records)} symbols: drift = {counts['drift']}, "
+        f"long_memory_candidate = {counts['long_memory_candidate']}, "
+        f"inconclusive = {counts['inconclusive']}, not run = {counts['not_run']}."
+    )
+    lines.append("")
+    width_txt = f"{width_hours:.1f} hours ({width_s:.0f} business-time seconds)" if width_s else "n/a"
+    lines.append(
+        f"Per symbol, on the FIRST business-time window only (to bound cost), the K=1 fit "
+        f"with one constant baseline is compared with K=1 using a piecewise-constant baseline "
+        f"over {drift_blocks} equal blocks, and with the window's K=2 fit. Median block "
+        f"width: {width_txt}. `dll_pw` and `dll_k2` are the log-likelihood gains over constant-"
+        "baseline K=1 from the block baseline and from the second kernel component; "
+        "`threshold` is chi-square(0.95, blocks−1)/2."
+    )
+    lines.append("")
+    lines.append("**Method caveats.**")
+    lines.append(
+        "- This is a heuristic likelihood-ratio screen, not a formal test: the fits are "
+        "Nelder-Mead optima, the chi-square calibration is only approximate for Hawkes "
+        "likelihoods, and the half-of-`dll_k2` cut-off is a convention."
+    )
+    lines.append(
+        f"- Resolution limit: a block baseline absorbs only drift slower than the block "
+        f"width ({width_txt}). Faster baseline wobble averages out inside a block and is "
+        "indistinguishable from long memory, so `long_memory_candidate` carries meaning "
+        "only for drift slower than that width."
+    )
+    lines.append(
+        "- Misspecification: when K=1 is wrong (genuine long memory) block counts are more "
+        "dispersed than K=1 predicts, inflating `dll_pw`; real long memory can therefore "
+        "read `inconclusive` instead of `long_memory_candidate`."
+    )
+    lines.append(
+        "- `drift` is the conservative, strong label: it requires the block baseline to be "
+        "significant AND to recover at least half of the K=2 gain. Business-time "
+        "rescaling has already removed the 48-bin periodic intraday profile, so the control "
+        "targets aperiodic drift."
+    )
+    lines.append("")
+    if assessed:
+        lines.append("| symbol | verdict | dll_pw | dll_k2 | threshold | n̂_1 (piecewise) | block width (h) |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for r in sorted(assessed, key=lambda r: r["n_events"], reverse=True):
+            lines.append(
+                f"| {r['symbol']} | {r['drift_verdict']} | {r['dll_pw']:.2f} | "
+                f"{r['dll_k2']:.2f} | {r['dll_threshold']:.2f} | "
+                f"{r['n_k1_piecewise']:.4f} | {r['drift_block_width_s'] / 3600.0:.2f} |"
+            )
+        lines.append("")
+    errors = [r for r in records if r.get("drift_error")]
+    for r in errors:
+        lines.append(f"- {r['symbol']}: drift control failed ({r['drift_error']}).")
+    if errors:
+        lines.append("")
+    return lines
 
 
 def _write_results_md(out_dir: Path, result: dict) -> None:
@@ -623,16 +811,22 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
         "confirmed endogeneity."
     )
     lines.append("")
-    lines.append(
-        "**The decisive control is pending, not implemented here.** The analysis that "
-        "WOULD separate these two explanations — refitting K=1 with a block-wise "
-        "(time-varying, piecewise-constant) mu instead of a single constant mu per "
-        "sub-window — is named here as the necessary next step and is explicitly out of "
-        "scope for this module. Until that control is run, this panel's Δ21 and "
-        "drift-suspect flag should be read as a triage tool (which symbols deserve the "
-        "decisive control first), not a final verdict on kernel misspecification vs. "
-        "residual drift."
-    )
+    if result.get("drift_blocks"):
+        lines.append(
+            "**The decisive control is run on one window per symbol** (see "
+            "\"Is the K=2 rise drift or memory?\" below): K=1 is refit with a block-wise "
+            "(piecewise-constant) mu and compared with the K=2 gain. It is a heuristic "
+            "screen with a stated resolution limit, so the Δ21 and drift-suspect flag above "
+            "remain triage quantities."
+        )
+    else:
+        lines.append(
+            "**The decisive control was not run** (`--drift-blocks 0`): refitting K=1 with "
+            "a block-wise (time-varying, piecewise-constant) mu would separate these two "
+            "explanations. Until it is run, this panel's Δ21 and drift-suspect flag should "
+            "be read as a triage tool, not a final verdict on kernel misspecification vs. "
+            "residual drift."
+        )
     lines.append("")
 
     lines.append("## Run summary")
@@ -649,9 +843,9 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
         lines.append("")
         lines.append(
             "| symbol | n_events | n̂_1 | n̂_2 | n̂_3 | Δ21 | 1/β_slow (K=2, s) | "
-            "÷ bin width | ÷ window length | drift-suspect | within null |"
+            "÷ bin width | ÷ window length | drift-suspect | within null | drift verdict |"
         )
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
         for r in sorted_records:
             n1 = r["n_median_by_k"].get(1)
             n2 = r["n_median_by_k"].get(2)
@@ -666,7 +860,8 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
                 f"{r['delta21']:+.4f} | {r['median_inv_beta_slow_k2_s']:.2f} | "
                 f"{_fmt_ratio(r['ratio_inv_beta_slow_to_bin_width'])} | "
                 f"{_fmt_ratio(r['ratio_inv_beta_slow_to_window_length'])} | "
-                f"{'YES' if r['drift_suspect'] else 'no'} | {within_null_s} |"
+                f"{'YES' if r['drift_suspect'] else 'no'} | {within_null_s} | "
+                f"{r.get('drift_verdict') or 'n/a'} |"
             )
         lines.append("")
     else:
@@ -744,6 +939,8 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
         )
     lines.append("")
 
+    lines.extend(_drift_section_lines(result))
+
     if result["failures"]:
         lines.append("## Failures")
         lines.append("")
@@ -774,10 +971,11 @@ def _write_results_md(out_dir: Path, result: dict) -> None:
     lines.append("## Caveats")
     lines.append("")
     lines.append(
-        "- **The confound is not resolved by this module.** See the dedicated section "
-        "above: a large Δ21 is consistent with BOTH genuine long-memory kernel structure "
-        "and residual baseline non-stationarity surviving deseasonalization. The "
-        "decisive control (K=1 fit with a block-wise, time-varying mu) is pending."
+        "- **The confound is only partly resolved.** A large Δ21 is consistent with BOTH "
+        "genuine long-memory kernel structure and residual baseline non-stationarity "
+        "surviving deseasonalization. The block-wise-baseline control (first window per "
+        "symbol, heuristic, limited to drift slower than its block width) is reported in "
+        "\"Is the K=2 rise drift or memory?\"; it is absent when `--drift-blocks 0`."
     )
     lines.append(
         f"- **Single month** ({month}): one specific market regime; results may not "
@@ -827,6 +1025,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "event count; default 5, tests use fewer to stay inside their runtime budget"
         ),
     )
+    parser.add_argument(
+        "--drift-blocks", type=int, default=DEFAULT_DRIFT_BLOCKS,
+        help=(
+            "number of equal business-time blocks for the piecewise-baseline drift "
+            f"control on each symbol's first window (2..{MAX_PIECEWISE_BLOCKS}); "
+            "0 disables the control"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -841,5 +1047,5 @@ if __name__ == "__main__":
     run_q6b(
         args.root, args.out, symbols=symbols, month=args.month,
         windows=args.windows, ks=_parse_ks(args.ks), q6_json=args.q6_json,
-        null_sims=args.null_sims,
+        null_sims=args.null_sims, drift_blocks=args.drift_blocks,
     )

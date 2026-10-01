@@ -45,7 +45,10 @@ from microstructure.analyses.q6b_kernel_sensitivity import (
     DESEASON_BIN_WIDTH_S,
     DRIFT_SUSPECT_MULTIPLIER,
     DRIFT_VERDICTS,
+    INCONCLUSIVE_REASONS,
+    MAX_FIT_EVENTS,
     _drift_headline,
+    _inconclusive_reason,
     _is_drift_suspect,
     _parse_args,
     _symbol_record,
@@ -499,10 +502,16 @@ def test_symbol_record_with_drift_control_round_trips_through_json(planted_root:
     decoded = json.loads(json.dumps(rec))
     _assert_only_native_scalars(rec)
     assert all(key in decoded for key in _DRIFT_KEYS)
-    assert "drift_error" not in rec, rec.get("drift_error")
+    assert rec["drift_error"] is None, rec["drift_error"]
     assert rec["drift_verdict"] in DRIFT_VERDICTS
     assert type(rec["drift_verdict"]) is str
-    assert all(type(rec[key]) is float for key in _DRIFT_KEYS if key != "drift_verdict")
+    assert rec["drift_inconclusive_reason"] in (*INCONCLUSIVE_REASONS, None)
+    assert (rec["drift_verdict"] == "inconclusive") == (rec["drift_inconclusive_reason"] is not None)
+    float_keys = [
+        k for k in _DRIFT_KEYS
+        if k not in ("drift_verdict", "drift_inconclusive_reason", "drift_error")
+    ]
+    assert all(type(rec[key]) is float for key in float_keys)
 
 
 # --- drift-vs-memory control wiring -----------------------------------------
@@ -565,6 +574,13 @@ def test_drift_control_record_fields_and_cross_section_counts(drift_panel: dict)
     for verdict in DRIFT_VERDICTS:
         assert counts[verdict] == sum(r["drift_verdict"] == verdict for r in records.values())
     assert drift_panel["drift_blocks"] == DEFAULT_DRIFT_BLOCKS
+    reasons = drift_panel["cross_section"]["drift_inconclusive_reason_counts"]
+    assert sum(reasons.values()) == counts["inconclusive"]
+    for rec in records.values():
+        assert (rec["drift_verdict"] == "inconclusive") == (
+            rec["drift_inconclusive_reason"] is not None
+        )
+        assert rec["drift_n_k2"] > 0.0 and rec["drift_n_k1"] > 0.0
 
 
 def test_drift_control_outputs_json_parquet_and_markdown(drift_panel: dict, planted_root: Path):
@@ -588,9 +604,16 @@ def test_drift_control_outputs_json_parquet_and_markdown(drift_panel: dict, plan
     counts = drift_panel["cross_section"]["drift_verdict_counts"]
     assert f"drift = {counts['drift']}, long_memory_candidate = " in md
     assert "heuristic likelihood-ratio screen" in md
-    assert "Resolution limit" in md and "hours" in md
-    assert "`inconclusive`" in md and "conservative" in md
+    assert "Resolution limit" in md and "business-time hours" in md
+    assert "Median block width" in md
+    assert f"capped at {MAX_FIT_EVENTS:,} events" in md
+    assert "(3 of 3 requested symbols assessed; failed, errored and not-run excluded)" in md
+    assert "no_rise = " in md and "k2_insignificant = " in md and "errored = 0" in md
+    assert "OR across the drift threshold into `drift`" in md
+    assert "does not exclude long memory" in md
+    assert "| n̂_1 (const) | n̂_2 | n̂_1 (piecewise) |" in md
     assert "| drift verdict |" in md
+    assert "conservative" not in md and "guarantee" not in md
 
 
 def test_drift_blocks_zero_skips_control_cleanly(
@@ -629,12 +652,93 @@ def test_cli_drift_blocks_flag_default_and_disable(tmp_path: Path):
     assert _parse_args(["--symbols-file", str(symbols), "--drift-blocks", "0"]).drift_blocks == 0
 
 
-def test_drift_headline_phrasing_follows_majority():
-    def counts(d: int, m: int, i: int) -> dict[str, int]:
-        return {"drift": d, "long_memory_candidate": m, "inconclusive": i, "not_run": 0}
+def _headline_counts(d: int, m: int, i: int, errored: int = 0) -> dict[str, int]:
+    return {
+        "drift": d, "long_memory_candidate": m, "inconclusive": i, "not_run": 0,
+        "errored": errored,
+    }
 
-    assert "mostly slow baseline drift in this window" in _drift_headline(counts(3, 1, 1), 1.0)
-    assert "not explained by drift slower than 2.5 hours" in _drift_headline(counts(0, 3, 1), 2.5)
-    assert "Unresolved" in _drift_headline(counts(2, 2, 1), 1.0)
-    assert "Unresolved" in _drift_headline(counts(2, 2, 0), 1.0)  # ties are not majorities
-    assert "No symbol was assessed" in _drift_headline(counts(0, 0, 0), None)
+
+def _reasons(no_rise: int = 0, k2_insig: int = 0, mixed: int = 0) -> dict[str, int]:
+    return {"no_rise": no_rise, "k2_insignificant": k2_insig, "mixed": mixed}
+
+
+def test_drift_headline_drift_majority_is_hedged_and_states_denominator():
+    h = _drift_headline(_headline_counts(3, 1, 1), _reasons(mixed=1), 1.0, 7)
+    assert (
+        "In this window, a block-wise baseline recovers at least half of the K=2 likelihood "
+        "gain for most assessed symbols — consistent with slow baseline drift (heuristic "
+        "screen; see caveats)"
+    ) in h
+    assert "(5 of 7 requested symbols assessed; failed, errored and not-run excluded)" in h
+    assert "mostly slow baseline drift" not in h
+
+
+def test_drift_headline_long_memory_candidate_majority_names_block_width():
+    h = _drift_headline(_headline_counts(0, 3, 1), _reasons(k2_insig=1), 2.5, 4)
+    assert "not explained by drift slower than 2.5 business-time hours (median block width)" in h
+
+
+def test_drift_headline_no_rise_majority_says_nothing_to_explain():
+    h = _drift_headline(_headline_counts(1, 0, 4), _reasons(no_rise=3, mixed=1), 1.0, 6)
+    assert (
+        "Most symbols show no material K=1→K=2 rise in this window — there is no apparent "
+        "near-criticality for the control to explain"
+    ) in h
+    assert "(5 of 6 requested symbols assessed" in h
+
+
+def test_drift_headline_unresolved_names_inconclusive_count_and_largest_reason():
+    h = _drift_headline(_headline_counts(6, 6, 18), _reasons(no_rise=12, mixed=6), 1.0, 30)
+    assert (
+        "No verdict holds a majority; 18 of 30 assessed symbols are inconclusive "
+        "(12 show no K=2 rise at all)"
+    ) in h
+    h2 = _drift_headline(_headline_counts(1, 1, 2), _reasons(k2_insig=2), 1.0, 4)
+    assert "2 of 4 assessed symbols are inconclusive (2 have a K=2 gain that is not significant)" in h2
+    # Ties are not majorities, and zero-inconclusive ties do not name a reason.
+    h3 = _drift_headline(_headline_counts(2, 2, 0), _reasons(), 1.0, 4)
+    assert "No verdict holds a majority" in h3 and "inconclusive" not in h3
+
+
+def test_drift_headline_no_symbol_assessed():
+    h = _drift_headline(_headline_counts(0, 0, 0, errored=2), _reasons(), None, 2)
+    assert "No symbol was assessed" in h and "(0 of 2 requested symbols assessed" in h
+
+
+@pytest.mark.parametrize(
+    ("n_k1", "n_k2", "dll_k2", "expected"),
+    [
+        (0.40, 0.45, 50.0, "no_rise"),  # rise 0.05 <= 0.1, even though dll_k2 is big
+        (0.40, 0.50, 50.0, "no_rise"),  # boundary: rise == 0.1 is still no_rise
+        (0.40, 0.60, 1.0, "k2_insignificant"),
+        (0.40, 0.60, 50.0, "mixed"),
+    ],
+)
+def test_inconclusive_reason_split(n_k1: float, n_k2: float, dll_k2: float, expected: str):
+    assert _inconclusive_reason(n_k1, n_k2, dll_k2) == expected
+
+
+def test_drift_control_exception_keeps_k_sweep_record_and_is_reported(
+    planted_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("synthetic control failure")
+
+    monkeypatch.setattr(q6b, "baseline_drift_control", _raise)
+    result = run_q6b(
+        planted_root, tmp_path / "out", symbols=["SMALLUSDT"], month="2023-06",
+        windows=WINDOWS, ks=KS, null_sims=0,
+    )
+    assert result["n_symbols_successful"] == 1, result["failures"]
+    rec = result["records"][0]
+    assert rec["n_median_by_k"][1] > 0.0 and rec["n_median_by_k"][2] > 0.0  # K-sweep survives
+    assert rec["drift_verdict"] is None
+    assert rec["drift_error"] == "RuntimeError: synthetic control failure"
+    counts = result["cross_section"]["drift_verdict_counts"]
+    assert counts["errored"] == 1 and counts["not_run"] == 0
+    md = (tmp_path / "out" / "q6b_kernel_sensitivity.md").read_text()
+    assert "SMALLUSDT: drift control errored (RuntimeError: synthetic control failure)" in md
+    assert "errored = 1" in md
+    df = pl.read_parquet(tmp_path / "out" / "q6b_kernel_sensitivity.parquet")
+    assert df["drift_error"].to_list() == ["RuntimeError: synthetic control failure"]

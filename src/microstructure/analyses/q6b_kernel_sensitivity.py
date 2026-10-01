@@ -73,6 +73,8 @@ import polars as pl
 
 from microstructure.data.catalog import parquet_path
 from microstructure.estimators.hawkes import (
+    DRIFT_K2_RISE_MIN,
+    K2_GAIN_MIN_DLL,
     MAX_PIECEWISE_BLOCKS,
     baseline_drift_control,
     fit_hawkes_exp,
@@ -123,9 +125,28 @@ DRIFT_VERDICTS: tuple[str, ...] = ("drift", "long_memory_candidate", "inconclusi
 # Per-symbol record keys produced by the drift control (all None when the
 # control is disabled or could not run).
 _DRIFT_KEYS: tuple[str, ...] = (
-    "drift_verdict", "dll_pw", "dll_k2", "dll_threshold", "n_k1_piecewise",
-    "drift_block_width_s",
+    "drift_verdict", "drift_inconclusive_reason", "dll_pw", "dll_k2", "dll_threshold",
+    "drift_n_k1", "drift_n_k2", "n_k1_piecewise", "drift_block_width_s", "drift_error",
 )
+
+# Why a symbol's verdict is 'inconclusive' (derived here from the control's
+# outputs; `_drift_verdict` itself only returns the bare label).
+INCONCLUSIVE_REASONS: tuple[str, ...] = ("no_rise", "k2_insignificant", "mixed")
+_REASON_PHRASES = {
+    "no_rise": "show no K=2 rise at all",
+    "k2_insignificant": "have a K=2 gain that is not significant",
+    "mixed": "have a significant K=2 gain that the block baseline recovers only partly",
+}
+
+
+def _inconclusive_reason(n_k1: float, n_k2: float, dll_k2: float) -> str:
+    """Reason for an 'inconclusive' verdict, mirroring `_drift_verdict`'s
+    check order: no material rise, then insignificant K=2 gain, else mixed."""
+    if n_k2 - n_k1 <= DRIFT_K2_RISE_MIN:
+        return "no_rise"
+    if dll_k2 < K2_GAIN_MIN_DLL:
+        return "k2_insignificant"
+    return "mixed"
 
 
 def _cap_events(times: np.ndarray, t_end: float) -> tuple[np.ndarray, float]:
@@ -244,11 +265,19 @@ def _drift_control_fields(first_window_k2: dict | None, drift_blocks: int) -> di
         )
     except Exception as e:  # noqa: BLE001 - keep the symbol's K-sweep result
         return {**empty, "drift_error": f"{type(e).__name__}: {e}"}
+    verdict = str(res["verdict"])
+    n_k1, n_k2, dll_k2 = float(res["n_k1"]), float(res["n_k2"]), float(res["dll_k2"])
     return {
-        "drift_verdict": str(res["verdict"]),
+        **empty,
+        "drift_verdict": verdict,
+        "drift_inconclusive_reason": (
+            _inconclusive_reason(n_k1, n_k2, dll_k2) if verdict == "inconclusive" else None
+        ),
         "dll_pw": float(res["dll_pw"]),
-        "dll_k2": float(res["dll_k2"]),
+        "dll_k2": dll_k2,
         "dll_threshold": float(res["dll_threshold"]),
+        "drift_n_k1": n_k1,
+        "drift_n_k2": n_k2,
         "n_k1_piecewise": float(res["n_k1_piecewise"]),
         "drift_block_width_s": float(t_end / drift_blocks),
     }
@@ -424,12 +453,28 @@ def _null_floor_p90(records: list[dict], null_sims: int, seed: int = 20240601) -
 
 
 def _drift_verdict_counts(records: list[dict]) -> dict[str, int]:
-    """Count of each drift verdict, plus `not_run` for symbols without one."""
+    """Count of each drift verdict, plus `errored` (control raised) and
+    `not_run` (control disabled / K=2 not fit)."""
     counts = {v: 0 for v in DRIFT_VERDICTS}
     counts["not_run"] = 0
+    counts["errored"] = 0
     for r in records:
         verdict = r.get("drift_verdict")
-        counts[verdict if verdict in DRIFT_VERDICTS else "not_run"] += 1
+        if verdict in DRIFT_VERDICTS:
+            counts[verdict] += 1
+        elif r.get("drift_error"):
+            counts["errored"] += 1
+        else:
+            counts["not_run"] += 1
+    return counts
+
+
+def _inconclusive_reason_counts(records: list[dict]) -> dict[str, int]:
+    counts = {reason: 0 for reason in INCONCLUSIVE_REASONS}
+    for r in records:
+        reason = r.get("drift_inconclusive_reason")
+        if reason in counts:
+            counts[reason] += 1
     return counts
 
 
@@ -443,6 +488,7 @@ def _cross_section(
             "cv_gap_correlation": None,
             "null_floor_p90": None,
             "drift_verdict_counts": _drift_verdict_counts([]),
+            "drift_inconclusive_reason_counts": _inconclusive_reason_counts([]),
         }
 
     delta21s = np.array([r["delta21"] for r in records if np.isfinite(r["delta21"])])
@@ -490,6 +536,7 @@ def _cross_section(
         "cv_gap_correlation": cv_gap_correlation,
         "null_floor_p90": null_floor_p90,
         "drift_verdict_counts": _drift_verdict_counts(records),
+        "drift_inconclusive_reason_counts": _inconclusive_reason_counts(records),
     }
 
 
@@ -588,9 +635,10 @@ _PARQUET_SCHEMA = {
     "n_hat_k2": pl.Float64, "n_hat_k3": pl.Float64, "delta21": pl.Float64,
     "median_inv_beta_slow_k2_s": pl.Float64, "ratio_inv_beta_slow_to_bin_width": pl.Float64,
     "ratio_inv_beta_slow_to_window_length": pl.Float64, "drift_suspect": pl.Boolean,
-    "drift_verdict": pl.Utf8, "dll_pw": pl.Float64, "dll_k2": pl.Float64,
-    "dll_threshold": pl.Float64, "n_k1_piecewise": pl.Float64,
-    "drift_block_width_s": pl.Float64,
+    "drift_verdict": pl.Utf8, "drift_inconclusive_reason": pl.Utf8,
+    "dll_pw": pl.Float64, "dll_k2": pl.Float64, "dll_threshold": pl.Float64,
+    "drift_n_k1": pl.Float64, "drift_n_k2": pl.Float64, "n_k1_piecewise": pl.Float64,
+    "drift_block_width_s": pl.Float64, "drift_error": pl.Utf8,
 }
 
 
@@ -646,20 +694,52 @@ def _fmt_ratio(ratio: float) -> str:
     return f"{ratio:.2f}x"
 
 
-def _drift_headline(counts: dict[str, int], width_hours: float | None) -> str:
-    """One-sentence headline from verdict counts (majority of ASSESSED symbols)."""
+def _drift_headline(
+    counts: dict[str, int],
+    reason_counts: dict[str, int],
+    width_hours: float | None,
+    n_requested: int,
+) -> str:
+    """One-sentence headline from verdict counts (majority of ASSESSED symbols).
+
+    The denominator is stated: assessed symbols are those with a verdict;
+    failed, errored and not-run symbols are excluded.
+    """
     assessed = sum(counts[v] for v in DRIFT_VERDICTS)
+    denominator = (
+        f"({assessed} of {n_requested} requested symbols assessed; "
+        "failed, errored and not-run excluded)"
+    )
     if assessed == 0:
-        return "No symbol was assessed, so nothing can be said about drift versus memory."
-    if counts["drift"] * 2 > assessed:
-        return (
-            "**The apparent near-criticality is mostly slow baseline drift in this "
-            "window.**"
+        return f"**No symbol was assessed, so nothing can be said about drift versus memory {denominator}.**"
+    if reason_counts["no_rise"] * 2 > assessed:
+        sentence = (
+            "Most symbols show no material K=1→K=2 rise in this window — there is no "
+            "apparent near-criticality for the control to explain"
         )
-    if counts["long_memory_candidate"] * 2 > assessed:
-        width = f"{width_hours:.1f} hours" if width_hours is not None else "the block width"
-        return f"**The K=2 rise is not explained by drift slower than {width}.**"
-    return "**Unresolved: no verdict holds a majority of the assessed symbols.**"
+    elif counts["drift"] * 2 > assessed:
+        sentence = (
+            "In this window, a block-wise baseline recovers at least half of the K=2 "
+            "likelihood gain for most assessed symbols — consistent with slow baseline "
+            "drift (heuristic screen; see caveats)"
+        )
+    elif counts["long_memory_candidate"] * 2 > assessed:
+        width = (
+            f"{width_hours:.1f} business-time hours (median block width)"
+            if width_hours is not None else "the block width"
+        )
+        sentence = f"The K=2 rise is not explained by drift slower than {width}"
+    else:
+        inconclusive = counts["inconclusive"]
+        if inconclusive > 0:
+            top = max(INCONCLUSIVE_REASONS, key=lambda r: reason_counts[r])
+            sentence = (
+                f"No verdict holds a majority; {inconclusive} of {assessed} assessed symbols "
+                f"are inconclusive ({reason_counts[top]} {_REASON_PHRASES[top]})"
+            )
+        else:
+            sentence = "No verdict holds a majority; drift and long-memory-candidate verdicts split the assessed symbols"
+    return f"**{sentence} {denominator}.**"
 
 
 def _drift_section_lines(result: dict) -> list[str]:
@@ -676,27 +756,34 @@ def _drift_section_lines(result: dict) -> list[str]:
 
     records = result["records"]
     counts = result["cross_section"]["drift_verdict_counts"]
+    reasons = result["cross_section"]["drift_inconclusive_reason_counts"]
     assessed = [r for r in records if r.get("drift_verdict") in DRIFT_VERDICTS]
     widths = [r["drift_block_width_s"] for r in assessed if r.get("drift_block_width_s")]
     width_s = float(np.median(widths)) if widths else None
     width_hours = width_s / 3600.0 if width_s is not None else None
 
-    lines.append(_drift_headline(counts, width_hours))
+    lines.append(_drift_headline(counts, reasons, width_hours, result["n_symbols_requested"]))
     lines.append("")
     lines.append(
-        f"Verdict counts over {len(records)} symbols: drift = {counts['drift']}, "
+        f"Verdict counts over {len(records)} symbols with results: drift = {counts['drift']}, "
         f"long_memory_candidate = {counts['long_memory_candidate']}, "
-        f"inconclusive = {counts['inconclusive']}, not run = {counts['not_run']}."
+        f"inconclusive = {counts['inconclusive']} "
+        f"(no_rise = {reasons['no_rise']}, k2_insignificant = {reasons['k2_insignificant']}, "
+        f"mixed = {reasons['mixed']}), not run = {counts['not_run']}, "
+        f"errored = {counts['errored']}."
     )
     lines.append("")
-    width_txt = f"{width_hours:.1f} hours ({width_s:.0f} business-time seconds)" if width_s else "n/a"
+    width_txt = (
+        f"{width_hours:.1f} business-time hours ({width_s:.0f} business-time seconds)"
+        if width_s else "n/a"
+    )
     lines.append(
-        f"Per symbol, on the FIRST business-time window only (to bound cost), the K=1 fit "
-        f"with one constant baseline is compared with K=1 using a piecewise-constant baseline "
-        f"over {drift_blocks} equal blocks, and with the window's K=2 fit. Median block "
-        f"width: {width_txt}. `dll_pw` and `dll_k2` are the log-likelihood gains over constant-"
-        "baseline K=1 from the block baseline and from the second kernel component; "
-        "`threshold` is chi-square(0.95, blocks−1)/2."
+        f"Per symbol, on the FIRST business-time window only (to bound cost; that window is "
+        f"capped at {MAX_FIT_EVENTS:,} events), K=1 with one constant baseline is compared "
+        f"with K=1 using a piecewise-constant baseline over {drift_blocks} equal blocks, and "
+        f"with the window's K=2 fit. Median block width: {width_txt}. `dll_pw` and `dll_k2` "
+        "are the log-likelihood gains over constant-baseline K=1 from the block baseline and "
+        "from the second kernel component; `threshold` is chi-square(0.95, blocks−1)/2."
     )
     lines.append("")
     lines.append("**Method caveats.**")
@@ -707,40 +794,47 @@ def _drift_section_lines(result: dict) -> list[str]:
     )
     lines.append(
         f"- Resolution limit: a block baseline absorbs only drift slower than the block "
-        f"width ({width_txt}). Faster baseline wobble averages out inside a block and is "
-        "indistinguishable from long memory, so `long_memory_candidate` carries meaning "
+        f"width (median {width_txt}). Faster baseline wobble averages out inside a block and "
+        "is indistinguishable from long memory, so `long_memory_candidate` carries meaning "
         "only for drift slower than that width."
     )
     lines.append(
         "- Misspecification: when K=1 is wrong (genuine long memory) block counts are more "
-        "dispersed than K=1 predicts, inflating `dll_pw`; real long memory can therefore "
-        "read `inconclusive` instead of `long_memory_candidate`."
+        "dispersed than K=1 predicts, inflating `dll_pw`. That can push a symbol with real "
+        "long memory to `inconclusive` OR across the drift threshold into `drift`. A `drift` "
+        "label means only that the block baseline recovers at least half of the K=2 gain; it "
+        "does not exclude long memory."
     )
     lines.append(
-        "- A verdict is only issued when the K=2 component is itself significant "
-        "(`dll_k2` >= chi2_0.95(2)/2 = 2.996); a K=1 -> K=2 rise in n with no significant "
-        "likelihood gain reads `inconclusive`, not `long_memory_candidate`."
+        f"- `inconclusive` is split by reason: `no_rise` (K=2 n̂ − K=1 n̂ ≤ "
+        f"{DRIFT_K2_RISE_MIN:g}, so there is nothing to explain), `k2_insignificant` (the "
+        f"K=2 gain `dll_k2` is below {K2_GAIN_MIN_DLL:.2f} nats = chi-square(0.95, 2)/2), "
+        "`mixed` (a material, significant K=2 gain that the block baseline recovers "
+        "significantly but by less than half)."
     )
     lines.append(
-        "- `drift` is the conservative, strong label: it requires the block baseline to be "
-        "significant AND to recover at least half of the K=2 gain. Business-time "
-        "rescaling has already removed the 48-bin periodic intraday profile, so the control "
-        "targets aperiodic drift."
+        "- Business-time rescaling has already removed the 48-bin periodic intraday "
+        "profile, so the control targets aperiodic drift."
     )
     lines.append("")
     if assessed:
-        lines.append("| symbol | verdict | dll_pw | dll_k2 | threshold | n̂_1 (piecewise) | block width (h) |")
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append(
+            "| symbol | verdict | inconclusive reason | n̂_1 (const) | n̂_2 | n̂_1 (piecewise) | "
+            "dll_pw | dll_k2 | threshold | block width (business-time h) |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
         for r in sorted(assessed, key=lambda r: r["n_events"], reverse=True):
             lines.append(
-                f"| {r['symbol']} | {r['drift_verdict']} | {r['dll_pw']:.2f} | "
+                f"| {r['symbol']} | {r['drift_verdict']} | "
+                f"{r['drift_inconclusive_reason'] or '—'} | {r['drift_n_k1']:.4f} | "
+                f"{r['drift_n_k2']:.4f} | {r['n_k1_piecewise']:.4f} | {r['dll_pw']:.2f} | "
                 f"{r['dll_k2']:.2f} | {r['dll_threshold']:.2f} | "
-                f"{r['n_k1_piecewise']:.4f} | {r['drift_block_width_s'] / 3600.0:.2f} |"
+                f"{r['drift_block_width_s'] / 3600.0:.2f} |"
             )
         lines.append("")
     errors = [r for r in records if r.get("drift_error")]
     for r in errors:
-        lines.append(f"- {r['symbol']}: drift control failed ({r['drift_error']}).")
+        lines.append(f"- {r['symbol']}: drift control errored ({r['drift_error']}).")
     if errors:
         lines.append("")
     return lines

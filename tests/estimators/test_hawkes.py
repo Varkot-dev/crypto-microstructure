@@ -878,5 +878,5 @@ def test_baseline_drift_control_on_two_exp_process_is_not_drift():
     assert result["verdict"] != "drift", f"result={result}"
     # Not asserted: verdict == "long_memory_candidate". When K=1 is misspecified (true
     # long memory) the block-level LR statistic is inflated, so an honest outcome here
-    # may be "inconclusive"; the method only guarantees it is not called drift.
+    # may be "inconclusive"; on the tested fixture it is not called drift.
     assert result["dll_pw"] < 0.5 * result["dll_k2"], f"result={result}"

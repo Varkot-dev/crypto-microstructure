@@ -1314,10 +1314,11 @@ def baseline_drift_control(
     likelihood-ratio asymptotics that Hawkes likelihoods only approximately
     satisfy, and the "at least half of dll_k2" cut-off is a convention, not
     derived. When the K=1 model is misspecified (genuine long memory), block
-    counts are more dispersed than K=1 predicts, which inflates dll_pw; a
-    long-memory process can therefore land on "inconclusive" rather than
-    "long_memory_candidate". Only "drift" requires dll_pw to be comparable
-    to the K=2 gain, so the screen is conservative about labelling drift.
+    counts are more dispersed than K=1 predicts, which inflates dll_pw. That
+    inflation can push a genuinely long-memory process to "inconclusive"
+    rather than "long_memory_candidate", OR across the drift threshold into
+    "drift". A "drift" label therefore means only that the block baseline
+    recovers at least half of the K=2 gain; it does not exclude long memory.
 
     RESOLUTION LIMIT: a block-wise constant baseline can absorb only drift
     that is SLOWER than the block width t_end / n_blocks. Faster baseline

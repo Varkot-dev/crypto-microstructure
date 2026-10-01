@@ -753,14 +753,23 @@ function flipParagraph(data) {
     )
     .join(' and ');
   const hasNative = flatRows.some((r) => r.universe === 'native');
+  const tStat = (r) => r.flip_slope / r.flip_stderr;
+  const marginal = detectable.filter((r) => tStat(r) < 3);
+  const marginalText = marginal.length
+    ? ` (marginally in ${joinList(marginal.map((r) => r.label))}, ` +
+      `t ${joinList(marginal.map((r) => fmt(tStat(r), 1)))})`
+    : '';
   return (
     `<strong>The flip law fades.</strong> The slope of p_flip on log activity runs ` +
     `${chain} across ${joinList(rows.map((r) => r.label))}. It is detectable — at least ` +
-    `two standard errors from zero — through ${lastDetectable.label} and absent in ` +
-    `${flatDetail}.` +
+    `two standard errors from zero — through ${lastDetectable.label}${marginalText} and ` +
+    `absent in ${flatDetail}.` +
     (hasNative
-      ? ` Because the native-universe run keeps the 2026 market's own symbols rather than ` +
-        `the 2023 survivors, the disappearance is not a survivorship artifact.`
+      ? ` The native-universe run keeps the 2026 market's own symbols rather than the 2023 ` +
+        `survivors, so the disappearance is not explained by survivorship in the fixed 2023 ` +
+        `panel (it still applies the one-million-event floor). Refit by cohort, the slope on ` +
+        `contracts present in both periods weakened to indistinguishable from zero, and ` +
+        `contracts listed since show none.`
       : '') +
     ` Do not read the sign agreement across regimes as persistence: a slope ` +
     `indistinguishable from zero has no reliable sign, so “same sign everywhere” is ` +
@@ -778,7 +787,7 @@ function gammaParagraph(data) {
   const nativeBreak = native.some((r) => r.gamma_r2 >= flat);
 
   let text =
-    `<strong>γ's liquidity-invariance breaks only on the 2023 panel.</strong> γ against ` +
+    `<strong>γ's liquidity-invariance breaks among the 2023-listed contracts.</strong> γ against ` +
     `activity is flat (R² below ${flat}) in ${joinList(flatFixed.map((r) => r.label))}, ` +
     `but R² is ${r2List(breakFixed)} on the fixed 2023 panel`;
   if (native.length && !nativeBreak) {
@@ -786,8 +795,10 @@ function gammaParagraph(data) {
       `, while on the 2026 market's own universe it is ${r2List(native)} — back below ` +
       `the bar, with a slope of ${joinList(native.map((r) => sign(r.gamma_slope)))} against ` +
       `${joinList(breakFixed.map((r) => sign(r.gamma_slope)))} on the panel. A weak ` +
-      `dependence remains, but the strong break shows up only among the 2023 survivors, ` +
-      `so it is at least partly a selection effect rather than a market-wide change.`;
+      `dependence remains. Refit by cohort (results/q8_regimes.md), the break is a ` +
+      `within-cohort change: on the same contracts γ became activity-dependent, while ` +
+      `contracts listed since show little, which dilutes the market-wide fit. It is not a ` +
+      `survivorship artifact.`;
   } else if (native.length) {
     text += `, and it also clears the bar on the native universe (${r2List(native)}).`;
   } else {
@@ -838,17 +849,32 @@ function endogeneityParagraph(data) {
   const labels = joinList(hawkes.map((r) => r.label));
   const rawMin = Math.min(...hawkes.map((r) => r.alpha_median));
   const base = hawkes[0];
+  const flagShift = 0.2; // Q8 flags a regime when its fast-mode share is > 0.2 above baseline
+  const shift = (r) => r.fast_mode_fraction - base.fast_mode_fraction;
+  const flagged = hawkes.filter((r) => shift(r) > flagShift);
+  const partial = hawkes.filter((r) => shift(r) > 0.1 && shift(r) <= flagShift);
+  const flagText =
+    ` Q8 flags ${joinList(flagged.map((r) => r.label))} (share more than ${flagShift} above the ` +
+    `baseline)` +
+    (partial.length
+      ? `; ${joinList(partial.map((r) => r.label))} is partly affected (raw ` +
+        `${joinList(partial.map((r) => fmt(r.alpha_median, 3)))} against slow-mode ` +
+        `${joinList(partial.map((r) => fmt(r.alpha_median_slow_mode, 3)))}) but below that threshold`
+      : '') +
+    '.';
   return (
     `<strong>Endogeneity drifts down moderately, not the way the raw median suggests.</strong> ` +
-    `The raw α̂ median (${col('alpha_median', 3)} across ${labels}) is contaminated by a ` +
+    `The raw α̂ median (${col('alpha_median', 3)} across ${labels}) is distorted by a ` +
     `kernel-mode switch: the share of single-exponential Hawkes fits that locked onto a fast ` +
     `decay (β̂ > 10, i.e. faster than 0.1 business-time seconds) is ` +
     `${col('fast_mode_fraction', 2)}. A fast-mode fit captures only part of the excitation, ` +
-    `so its α̂ is lower by construction. The comparable numbers are the slow-mode α median ` +
+    `so its α̂ is lower by construction.${flagText} The comparable numbers are the slow-mode α median ` +
     `(${col('alpha_median_slow_mode', 3)}) and the count-variance n̂ (${col('alpha_cv_median', 3)}), ` +
     `which assumes no kernel shape. Read that way, the drift is moderate and not strictly ` +
     `monotonic — not the ${fmt(base.alpha_median, 2)} → ${fmt(rawMin, 2)} crash the raw median ` +
-    `implies.` +
+    `implies. The paired slow-mode α̂ shifts for the two latest months have bootstrap ` +
+    `intervals that include zero, so the count-variance decline is the firmer evidence of ` +
+    `direction.` +
     (noHawkes.length
       ? ` ${joinList(noHawkes.map((r) => r.label))} has no Hawkes run, so it has no ` +
         `endogeneity numbers.`

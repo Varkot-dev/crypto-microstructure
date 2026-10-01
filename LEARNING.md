@@ -1505,23 +1505,29 @@ sign changed: γ̂ drifted very slightly *down* with activity in both 2023 month
 with it. α̂ stays flat throughout in the sense that its activity slope is within 2 standard errors
 of zero in every regime (largest R² 0.0725, at n = 33 in 2025-07).
 
-Then the survivorship-free check: on the 2026 market's own 231-symbol universe, γ̂-vs-activity has
-**R² = 0.0196** (slope +0.0612, stderr 0.0286). The invariance break is therefore a property of
-the fixed 2023 panel's survivors and does not reappear when the symbol set is the market's own.
-That makes it at least partly a selection effect. It is not shown to be entirely one: the native
-universe differs in composition, shares only 39 symbols with the baseline's successful set, and
-its γ̂ rank correlation on that overlap is ρ = 0.017, so nothing here says the same symbols
-behave the same way.
+Then the check on the 2026 market's own universe (free of the fixed-2023-panel survivorship, though
+it still applies the 1M-event floor): on 231 symbols, γ̂-vs-activity has **R² = 0.0196** (slope
++0.0612, stderr 0.0286, about 2.1 se). That is a weakly positive slope, not a zero one. It looked
+like a selection effect, so Q8 now refits by cohort. On the 39 contracts present in both periods,
+γ̂'s activity slope went from +0.0335 (t +0.98, R² 0.025) in 2023-06 to +0.1896 (t +3.56, R²
+0.256) in 2026-07; on the 192 contracts listed since it is +0.0422 (t +1.32, R² 0.009). So the
+break is a real within-cohort change among the 2023-listed contracts, diluted market-wide by newer
+listings, and the weak native slope is those 39 contracts diluted by 192 new ones. It is not a
+survivorship artifact. The native universe still differs in composition, and the γ̂ rank
+correlation on the 39-symbol overlap is ρ = 0.017, so nothing here says the same symbols behave
+the same way.
 
 So the two-invariant hypothesis survives falsifier (3) for α̂ (with the kernel-mode caveat in
-§8.4) and **fails it for γ̂ on the fixed panel, but not on the native 2026 universe**. The honest
-restatement: γ̂'s liquidity-invariance is established for 2023-06, 2023-07 and 2024-07 and is
-broken on the fixed panel from 2025-07, with the native-universe result pointing to the panel
-rather than the market as at least part of the reason. Whether it is all of the reason is open.
+§8.4) and **fails it for γ̂ among the 2023-listed contracts, and only weakly on the native 2026 universe**.
+The honest restatement: γ̂'s liquidity-invariance is established for 2023-06, 2023-07 and 2024-07
+and is broken among the 2023-listed contracts from 2025-07; the native universe dilutes it with
+newer listings that show little (t +1.32). Why the same contracts changed is not explained here.
 
 The native universe also spans 1.52 decades of activity against the baseline's 1.33 — a modest
-step toward falsifier (1), and γ̂ stays near flat across it. Until (1) is done with genuinely
-illiquid symbols and the fixed-panel break is fully attributed, this remains a pattern noticed
+step toward falsifier (1), and across it the γ̂ slope is weakly positive (+0.061 at 2.1 se), not
+zero, and by the cohort split that is the 39 shared contracts diluted by 192 new ones. Until (1) is
+done with genuinely illiquid symbols and the break among the 2023-listed contracts is explained,
+this remains a pattern noticed
 across phases, offered as a hypothesis with named ways to kill it — one of which has now
 half landed. It is not a law.
 
@@ -1586,7 +1592,8 @@ The three things that can happen, and they are genuinely different findings:
    original measurement was an artifact of that period's sample.
 
 And there is a fourth possibility that is not about the market at all: **the panel changed under
-you**. That is §8.3. It turned out to matter for γ̂ and not for the flip law.
+you**. That is §8.3. It did not explain the flip law's disappearance, and for γ̂ the cohort split
+shows the break is a change among the 2023-listed contracts rather than a panel artifact.
 
 The design choice worth defending: four of the five comparison regimes use a universe **fixed to
 the 2023-06 symbol list** (`results/universe_2023-06.txt`, 207 requested symbols). Symbols that
@@ -1631,7 +1638,7 @@ itself: a slope within 2 stderr of zero has no reliable sign, so in 2026-07 and 
 positive sign carries no information. The law is absent there, not confirmed, and a same-sign
 verdict should be read as nothing more than that.
 
-**Verdict 2 — γ invariance breaks on the fixed panel and not on the native universe.**
+**Verdict 2 — γ invariance breaks on the fixed panel and is diluted on the native universe.**
 γ̂-vs-activity R² is **0.0003, 0.0086, 0.0013** (2023-06, 2023-07, 2024-07), then **0.2505**
 (2025-07) and **0.2441** (2026-07) on the fixed universe. The comparator's rule is that invariance
 holds iff *every* regime's R² is below 0.05; 2025-07 and 2026-07 fail it, so the verdict is
@@ -1639,7 +1646,8 @@ holds iff *every* regime's R² is below 0.05; 2025-07 and 2026-07 fail it, so th
 +0.0126 are all small, then +0.1588 and +0.1683. An earlier version of this section dated the
 break to 2026-07 and called it the only reversal; it first appears in 2025-07. On the native 2026
 universe the R² is **0.0196** (slope +0.0612, stderr 0.0286 — about 2.1 stderr, explaining 2% of
-the variance). §8.3 takes up what that does and does not establish.
+the variance). §8.3 takes up what that does and does not establish: the cohort split there
+attributes the dilution to newer listings, not to survivorship.
 
 A drop-one-out refit leaves the fixed-panel break's direction intact. For 2025-07 (n = 94, full
 slope 0.1588, R² 0.2505) the slope stays positive under every single-symbol removal (range
@@ -1655,7 +1663,9 @@ mislead.** The Hawkes branching ratio's regression on log₁₀(activity) has R�
 in every one (the largest, 2025-07, is 1.6 stderr at n = 33). The *level* is where it needs care:
 the raw medians 0.7070, 0.6925, 0.3874, 0.4847, 0.5766 are confounded by a kernel-mode switch,
 and §8.4 unpicks it. The short version is that endogeneity does drift down, by roughly 0.02–0.17
-in α̂ and 0.01–0.06 in the kernel-free n̂ on paired symbols, and not monotonically.
+in α̂ and 0.01–0.06 in the kernel-free n̂ on paired symbols, and not monotonically. The two
+largest paired α̂ shifts (2025-07, 2026-07) have bootstrap intervals that include zero (§8.4); the
+n̂ decline is the firmer evidence of direction.
 
 ### 8.3 Market change or panel change? The native 2026 run
 
@@ -1707,26 +1717,41 @@ ten most active native-universe symbols, BTCUSDT and ETHUSDT have the highest p_
 high-activity names are not the high-flip names is one way the slope could vanish. I have not
 tested it.
 
-**The γ̂ break: it is partly a selection effect, and I do not know how much.** γ̂-vs-activity on the
-native universe is R² = 0.0196, against 0.2505 and 0.2441 on the fixed panel in 2025-07 and
-2026-07. Same estimator, same month. The break lives in the fixed panel's survivors. What this does
-not establish is that the break is *entirely* an artifact, for three reasons. The native universe
-has a different composition (192 symbols outside the baseline's successful set, 39 shared). The
-overlap is thin: on those 39 symbols γ̂ rank correlation is ρ = 0.017, p_flip ρ = 0.360, so the
-native run is not measuring the same objects. And the native slope, though small in R², is +0.0612
-at about 2.1 stderr — weakly positive, not zero. Separately, median γ̂ fell from 0.3221 (2023-07)
-to 0.2386 (2024-07) and has stayed between 0.187 and 0.207 since, on both universes — a level shift
-that the cross-sectional regression does not touch and that this data does not explain.
+**The γ̂ break: it is confined to the 2023-listed contracts, and newer listings dilute it.**
+γ̂-vs-activity on the native universe is R² = 0.0196, against 0.2505 and 0.2441 on the fixed panel
+in 2025-07 and 2026-07. Same estimator, same month. An earlier version of this section read that
+as a selection effect. The cohort split in Q8 does not support that reading. Both laws were refit
+on three groups:
 
-**What would still discriminate.** One cheap run remains: **refit the 2023 baseline restricted to
-the 40 symbols that survive to 2026**. If γ̂ already tracks activity there, the 2025/2026 break
-was baked into which symbols survive. It was previously ranked behind a native run; the native
-result makes it less decisive for the flip law, but it is still the cleanest test for γ̂. Q6 has
-no native-universe run, so the endogeneity comparison below still rests on the 2023 panel's
-survivors.
+| cohort | n | flip slope (t) | flip R² | γ̂ slope (t) | γ̂ R² |
+|---|---|---|---|---|---|
+| 2023-06 data, shared symbols | 39 | +0.0999 (+4.04) | 0.306 | +0.0335 (+0.98) | 0.025 |
+| 2026-07 data, same 39 symbols | 39 | +0.0307 (+1.12) | 0.033 | +0.1896 (+3.56) | 0.256 |
+| 2026-07 new listings | 192 | −0.0023 (−0.17) | 0.000 | +0.0422 (+1.32) | 0.009 |
 
-The honest state: **the flip law's disappearance is a change in the 2026 market, not a panel
-artifact. The γ̂ break is at least partly a panel artifact, and its remainder is unresolved.**
+Within the *same* 39 contracts γ̂ went from no activity dependence to a clear one, so the break is
+a real within-cohort change, not a product of which symbols survived. The 192 contracts listed
+since show little, which is why the market-wide slope is only +0.0612 at about 2.1 stderr (weakly
+positive, not zero). The native universe also differs in composition: its 192 new symbols include
+contract types absent in 2023 (tokenized-equity-style perpetuals such as SKHYNIXUSDT, SNDKUSDT,
+MUUSDT and SOXLUSDT, and USDC-margined pairs). The overlap is thin: on the 39 shared symbols γ̂
+rank correlation is ρ = 0.017, p_flip ρ = 0.360, so which contracts have high γ̂ is not stable
+even where the slope is. Separately, median γ̂ fell from 0.3221 (2023-07) to 0.2386 (2024-07) and
+has stayed between 0.187 and 0.207 since, on both universes — a level shift that the
+cross-sectional regression does not touch and that this data does not explain.
+
+**The flip law, by the same split.** On the shared 39 contracts the flip slope weakened from
++0.0999 (t +4.04) to +0.0307 (t +1.12): weakened to indistinguishable from zero, not
+confirmed gone. The 192 new listings show none (t −0.17). So the fixed-panel disappearance is not
+explained by survivorship (the law does not come back on the market's own universe).
+
+**What this leaves open.** Why the same contracts changed. The cohort slopes rest on 39 symbols
+and carry wide intervals. Q6 has no native-universe run, so the endogeneity comparison below
+still rests on the 2023 panel's survivors.
+
+The honest state: **the flip law's disappearance is not explained by survivorship: it weakened on
+the shared contracts and the newer listings show none. The γ̂ break is a within-cohort change among
+the 2023-listed contracts, diluted market-wide by newer listings.**
 
 ### 8.4 Endogeneity drifts down, but not monotonically, and the raw medians mislead
 
@@ -1740,8 +1765,10 @@ timescales, the fit can lock onto the fast component, which shows up as a large 
 a fast-component fit understates α̂ by construction. The share of fits with β̂ > 10 (decay faster
 than 0.1 business-time seconds) is **0.12, 0.12, 0.49, 0.33, 0.31** across the five regimes. The
 2023 months are mostly slow-mode; from 2024-07 a third to a half of the fits are not. A raw median
-that mixes the two modes is partly a statement about the mix. The comparator therefore flags
-these regimes and refuses to read the raw median as an endogeneity change.
+that mixes the two modes is partly a statement about the mix. The comparator flags regimes whose
+fast-mode share is more than 0.2 above the baseline's and refuses to read their raw median as an
+endogeneity change: that is 2024-07 and 2025-07. 2026-07 (share 0.31, shift 0.19) is partly
+affected, raw 0.577 against slow-mode 0.660, but falls below the flag threshold.
 
 **Comparable measures.**
 
@@ -1758,14 +1785,20 @@ Both estimators agree on direction in every regime. The size is roughly 0.02–0
 2026-07, and in n̂ the other way round. That is a moderate downward drift, a weaker sentence than
 "fell from about 71% to about 58%". The paired α̂ sets are small (18–34 symbols) and selected on
 being slow-mode in both months, so those deltas carry more uncertainty than three decimals imply.
+A bootstrap of the median (4000 resamples) puts the 2025-07 Δα̂ at −0.168 with 95% CI
+[−0.276, +0.035] and the 2026-07 Δα̂ at −0.098 with CI [−0.19, +0.024]: both include zero, so the
+two largest α̂ shifts are not distinguishable from zero. The 2023-07 and 2024-07 α̂ intervals and
+all the n̂_CV intervals exclude zero, which makes the count-variance decline the firmer evidence of
+direction.
 The n̂ estimator has its own caveat (window sensitivity, §7.3), so agreement between the two is
 reassuring and not conclusive.
 
 **The MLE-vs-count-variance gap** that §7.3 flagged is 0.2395, 0.2636, 0.4656, 0.4198, 0.2977 across
 the regimes. An earlier version of this section read the baseline-to-2026 widening as evidence that
 the exponential-kernel lower bound was doing more work over time. The jump in 2024-07 and 2025-07
-coincides with the fast-mode shares and is consistent with the same artifact; I would not read it
-as a separate finding.
+coincides with the fast-mode shares (0.49, 0.33), but only partly: in 2026-07 the gap is back to
+0.2977 (baseline 0.2395) while the fast-mode share is still 0.31. The artifact is a candidate
+explanation, not an established one; I would not read the gap as a separate finding.
 
 What survives: α̂'s liquidity-invariance (slope within 2 stderr in every regime), and a moderate
 downward drift in endogeneity that both estimators see. What does not: "monotonic", "the cleanest
@@ -1805,11 +1838,13 @@ about all they support.
   single July. Within-year variation, and anything seasonal about July, is not separated from the
   year-on-year change. The flip law's path (a step down by 2024-07, a plateau, then nothing) is
   as much shape as one point per year resolves.
-- **The native universe is a different panel.** It resolves the flip law's survivorship question
+- **The native universe is a different panel.** It addresses the flip law's survivorship question
   but not the composition question: 192 of its 231 symbols are outside the baseline's successful
-  set, and only 39 overlap. It has no Q6 run.
-- **The γ̂ break is not fully attributed.** Partly selection, remainder unresolved; the
-  baseline-restricted-to-survivors refit has not been run.
+  set, only 39 overlap, and the new symbols include contract types absent in 2023. It still
+  applies the 1M-event floor and has no Q6 run. The cohort split separates the 39 shared contracts
+  from the 192 new ones, but each cohort slope rests on few symbols.
+- **The γ̂ break is located, not explained.** It is a within-cohort change among the 2023-listed
+  contracts (t +0.98 to +3.56 on the same 39); why those contracts changed is not established.
 - **Raw α̂ medians are contaminated by the kernel-mode switch.** Only the slow-mode median, the
   count-variance n̂ and the paired deltas are comparable across regimes, and the paired α̂ sets
   are small and selected.
@@ -1825,10 +1860,11 @@ about all they support.
 ### 8.7 The one-sentence version
 
 **The flip law holds out of sample one month later, weakens through 2024–2025, and is absent in
-2026 on both the fixed 2023 universe and the 2026 market's own, so that disappearance is a change
-in the market and not survivorship; the γ̂ break appears only on the fixed 2023 panel and is at
-least partly a selection effect; and endogeneity drifts down by a moderate, non-monotone amount
-once the kernel-mode artifact in the raw α̂ medians is set aside.**
+2026 on both the fixed 2023 universe and the 2026 market's own, so that disappearance is not
+explained by survivorship (on the 39 shared contracts it weakened from t 4.0 to 1.1; the 192 newer
+listings show none); the γ̂ break is a within-cohort change among the 2023-listed contracts,
+diluted market-wide by newer listings; and endogeneity drifts down by a moderate, non-monotone
+amount once the kernel-mode artifact in the raw α̂ medians is set aside.**
 
 ---
 
@@ -2326,10 +2362,12 @@ within 2 stderr of zero has no reliable sign, and the comparator now says so its
 
 γ̂'s liquidity-invariance is the sharper story, and it needs two sentences. On the fixed panel the
 R² of γ̂ against activity is **0.0003, 0.0086, 0.0013, then 0.2505 (2025-07) and 0.2441 (2026-07)**,
-with the slope changing from small and negative to +0.16. On the 2026 market's own universe it is
-**0.0196**. My §7.6 hypothesis named "a different month" as its own falsifier; it fired for γ̂ on the
-fixed panel, did not fire for α̂ (slope within 2 stderr of zero in every regime), and the native
-run says the γ̂ break is at least partly about which 2023 symbols survived.
+with the slope going from small and of mixed sign (−0.011, −0.022, +0.013) before 2025 to +0.16. On
+the 2026 market's own universe it is **0.0196**. My §7.6 hypothesis named "a different month" as
+its own falsifier; it fired for γ̂ on the fixed panel and did not fire for α̂ (slope within 2 stderr
+of zero in every regime). The cohort split says the γ̂ break is real: on the same 39 contracts the
+activity slope went from +0.034 (t +1.0) to +0.190 (t +3.6), and the 192 contracts listed since
+show little (t +1.3), which is why the market-wide R² stays small.
 
 The distinction I'd want to make explicit: out-of-sample in time for a *cross-sectional* law is
 not "does this symbol still behave this way." That's a rank-correlation question and I measured it
@@ -2357,20 +2395,29 @@ the 46 survivors span 1.20 decades with sd 0.296, against 1.33 and 0.279 for the
 axis was not compressed. That kind of check is why I computed it before repeating the argument.
 
 The better test was the native run: ask the 2026 market for its own symbols — 371 requested, 231
-passing — and see whether the flip law returns. It does not (slope +0.0006, stderr 0.0126, R² 0.000).
-So for the flip law survivorship is rejected as the explanation, and the disappearance is a change
-in the market. For γ̂ the answer is different: R² is 0.0196 on the native universe against 0.2441 on
-the fixed panel, so the break lives in the survivors, at least in part. I would not say it is *all*
-survivorship, because the native universe is a different population — 192 of its 231 symbols are
-outside the baseline's successful set, and on the 39 shared symbols γ̂ rank correlation is only
-0.017.
+passing, against 121 in the baseline — and see whether the flip law returns. It does not (slope
++0.0006, stderr 0.0126, R² 0.000). So for the flip law survivorship is not the explanation. The
+native run is free of the fixed-2023-panel survivorship but still applies the 1M-event floor (138
+of 371 fall below it) and only contains symbols that exist in 2026, so I split it by cohort. On the
+39 contracts present in both periods the flip slope went from +0.0999 (t +4.0) to +0.0307 (t +1.1):
+weakened to indistinguishable from zero. The 192 contracts listed since show none (t −0.2), and
+they include contract types absent in 2023 (tokenized-equity-style perpetuals such as SKHYNIXUSDT,
+SNDKUSDT, MUUSDT and SOXLUSDT, and USDC-margined pairs).
+
+For γ̂ the cohort split changes the answer I used to give. The native R² is 0.0196 against 0.2441
+on the fixed panel, which I first read as a selection effect. But on the *same* 39 contracts γ̂
+went from no activity dependence (slope +0.0335, t +0.98) to a clear one (+0.1896, t +3.56, R²
+0.256), while the 192 newer listings show little (+0.0422, t +1.32). That is a within-cohort
+change among the 2023-listed contracts, diluted market-wide by newer listings, not a survivorship
+artifact. What I can't say is why those contracts changed; and 39 symbols is a thin cohort.
 
 One more distinction, because conflating them would inflate the story: **68 "no data" is a fact
 about the market; 93 "below floor" is a fact about my filter.** Those 93 traded, just not a million
 times that month. Only the first group is delisting.
 
-What's left to run: refit the **2023-06 baseline restricted to the 40 survivors**. If γ̂ already
-tracks activity there, the later break was baked into the sample. It is the cheapest remaining run.
+That restricted refit is, in effect, the first row of the cohort table: on the 2023-06 data the
+shared contracts show no γ̂ dependence (R² 0.025), so the later break was not baked into which
+symbols survive.
 
 ---
 
@@ -2378,20 +2425,25 @@ tracks activity there, the later break was baked into the sample. It is the chea
 
 Four things moved, with different amounts of confidence.
 
-**The panel emptied out.** 68 of 207 contracts stopped trading entirely; 93 more fell under the
-activity floor. That's the largest single change and it's not a microstructure finding, it's
-market structure: consolidation into fewer, more liquid contracts.
+**The fixed panel emptied out, but that is not a finding about the market.** Of the 207 requested
+contracts, 68 have no 2026-07 data (delisted, renamed or migrated; MATIC and FTM are migrations),
+and 93 fall under the 1M-event floor, which is a fact about my filter. The market's own 2026
+universe has 231 symbols passing the floor against 121 in the baseline, so I would not describe
+this as consolidation into fewer contracts; the cross-section got larger, not smaller, and its new
+members include contract types that did not exist in 2023.
 
 **Lag-1 alternation weakened and stopped depending on activity.** Median p_flip on the fixed panel
 runs 0.4543 → 0.4483 → 0.3840 → 0.3738 → 0.4154, and anti-persistent symbols (p_flip > 0.5) go
 **20, 15, 4, 6, 4** — not monotone, but well below 2023. The flip-law slope went from 0.1114 to
-nothing, on both universes. This is the finding I'd defend as a market change, because the
-native-universe run rules out survivorship.
+nothing, on both universes. This is the finding I'd defend as not a survivorship artifact: the
+native-universe run does not bring the law back, and on the 39 shared contracts it weakened from
+t 4.0 to t 1.1, while the 192 newer listings show none.
 
-**Long memory got shorter.** Median γ̂ fell 0.3270 → 0.3221 → 0.2386 → 0.1868 → 0.1991, with
-0.2071 on the native universe. Note the timing: the step is between 2023-07 and 2024-07, and the
-level has been roughly flat since. The γ̂-vs-activity break is a separate matter, mostly a
-fixed-panel effect.
+**Long memory got longer.** Median γ̂ fell 0.3270 → 0.3221 → 0.2386 → 0.1868 → 0.1991, with
+0.2071 on the native universe, and a lower γ̂ means slower decay of the autocorrelation, so
+stronger memory. Note the timing: the step is between 2023-07 and 2024-07, and the level has been
+roughly flat since. The γ̂-vs-activity break is a separate matter, confined to the 2023-listed
+contracts and diluted market-wide by newer listings.
 
 **Endogeneity fell, moderately.** This is the one where I changed my answer. The raw Hawkes α̂
 median goes 0.7070 → 0.6925 → 0.3874 → 0.4847 → 0.5766, which looks like a big, non-monotone
@@ -2400,13 +2452,15 @@ rises from 0.12 to 0.49, 0.33, 0.31, and those fits understate α̂ by construct
 only, the median goes 0.753 → 0.722 → 0.702 → 0.585 → 0.660; on the kernel-free count-variance
 estimator, 0.959 → 0.943 → 0.930 → 0.933 → 0.890. On symbols paired across months the drop against
 2023-06 is roughly 0.02–0.17 in α̂ and 0.01–0.06 in n̂. Both estimators agree on direction, and
-neither shows a monotone path.
+neither shows a monotone path. The two largest α̂ deltas (2025-07, 2026-07) have bootstrap CIs
+that include zero, so the count-variance decline is the firmer evidence.
 
 What I won't claim: a mechanism. One July per year can't separate a gradual maturation from a step
 and a plateau, and the paired α̂ sets are 18–34 symbols selected on being slow-mode. I'd also not
 read the MLE-vs-count-variance gap (0.2395, 0.2636, 0.4656, 0.4198, 0.2977) as the lower bound
-"doing more work" over time; it moves with the fast-mode share and is consistent with the same
-artifact.
+"doing more work" over time; it tracks the fast-mode share in 2024-07 and 2025-07 but only partly in
+2026-07 (gap 0.2977, share still 0.31), so the artifact is a candidate explanation, not an
+established one.
 
 ---
 

@@ -21,18 +21,24 @@ cross-section and kernel explorers, plus how the numbers were verified.
   (2023-07: slope +0.0920, R² = 0.2328). It weakens to about +0.045 in 2024-07 and 2025-07 (each
   roughly 2.3-2.4 standard errors from zero) and is absent in 2026-07: slope +0.0230 (stderr
   0.0325) on the fixed 2023 universe, and **slope +0.0006 (stderr 0.0126), R² = 0.000, n = 231**
-  on the 2026 market's own universe. The native-universe run is free of survivorship, so the
-  disappearance is a change in the market and not an artifact of which 2023 symbols survived
-  (that universe does differ in composition; see the report).
+  on the 2026 market's own universe. The native-universe run is free of the fixed-2023-panel
+  survivorship, so the disappearance is not explained by which 2023 symbols survived (it still
+  applies the 1M-event floor, and the universe differs in composition; see the report). Refit
+  by cohort, the flip slope on the 39 contracts present in both periods fell from +0.0999
+  (t +4.0) to +0.0307 (t +1.1), indistinguishable from zero, and the 192 contracts listed since
+  show none (t -0.2).
   → [`results/q4_cross_section.md`](results/q4_cross_section.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
 - **The order-flow-memory exponent γ̂ is liquidity-invariant in 2023; the later break is
-  confined to the fixed 2023 panel.** Regressed against log-activity across the 121-symbol
+  confined to the 2023-listed contracts.** Regressed against log-activity across the 121-symbol
   cross-section: **slope −0.0112, R² = 0.0003** — essentially flat, and still flat in 2023-07
   and 2024-07 (R² 0.0086, 0.0013). On the same fixed universe R² then jumps to 0.2505 in 2025-07
   and 0.2441 in 2026-07, but on the 2026 market's own 231-symbol universe it is small again
-  (R² = 0.0196). The break is therefore at least partly a selection effect of which 2023 symbols
-  survive; it is not shown to be entirely one.
+  (R² = 0.0196). Splitting that universe by cohort: on the same 39 contracts γ̂ went from no
+  activity dependence (2023-06 slope +0.0335, t +1.0) to a clear one (2026-07 slope +0.1896,
+  t +3.6, R² = 0.256), while the 192 contracts listed since show little (slope +0.0422, t +1.3,
+  R² = 0.009). The break is a within-cohort change among 2023-listed contracts, diluted
+  market-wide by newer listings; it is not a survivorship artifact.
   → [`results/q4_cross_section.md`](results/q4_cross_section.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
 - **~70% of trades are reactions to other trades in 2023, drifting down moderately after.** The
@@ -42,7 +48,8 @@ cross-section and kernel explorers, plus how the numbers were verified.
   a multi-timescale kernel (and so understate α̂ by construction) rises from 0.12 to 0.31–0.49.
   On kernel-mode-robust measures (slow-mode α̂, kernel-free count-variance n̂, and symbols paired
   across months) the drift is downward by roughly 0.02–0.17 in α̂ and 0.01–0.06 in n̂, and not
-  monotonic. α̂ shows no activity dependence beyond 2 standard errors in any regime.
+  monotonic; the two largest paired α̂ shifts (2025-07, 2026-07) have bootstrap intervals that
+  include zero, so the count-variance decline is the firmer evidence of direction. α̂ shows no activity dependence beyond 2 standard errors in any regime.
   → [`results/q6_endogeneity.md`](results/q6_endogeneity.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
 - **Front-loading execution trades a deterministic cost for a stochastic one.** Against replayed
@@ -69,7 +76,7 @@ cross-section and kernel explorers, plus how the numbers were verified.
 | Q5 | Critical balance β = (1−γ)/2 holds for 12 of 16 kernel-panel symbols | [md](results/q5_kernel_panel.md) · [png](results/q5_kernel_panel.png) |
 | Q6 | Median branching ratio 0.707 — ~70% of trades are endogenous reactions | [md](results/q6_endogeneity.md) · [png](results/q6_endogeneity.png) |
 | Q7 | Front-loaded execution: 15× variance reduction vs. TWAP/reactive | [md](results/q7_execution.md) · [png](results/q7_execution.png) |
-| Q8 | Flip law fades to zero by 2026 on both fixed and native universes; γ̂ break confined to the survivor panel; endogeneity drifts down modestly | [md](results/q8_regimes.md) · [png](results/q8_regimes.png) |
+| Q8 | Flip law fades to zero by 2026 on both fixed and native universes; γ̂ break confined to the 2023-listed contracts, diluted by newer listings; endogeneity drifts down modestly | [md](results/q8_regimes.md) · [png](results/q8_regimes.png) |
 
 ```
 docs/        report.md (full write-up), research/, plans/, specs/ — see docs/README.md

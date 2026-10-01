@@ -94,7 +94,13 @@ def _write_q4_json(
     (out_dir / "q4_cross_section.json").write_text(json.dumps(payload, indent=2))
 
 
-def _write_q6_json(out_dir: Path, month: str, alpha_by_symbol: dict[str, float], n_events_by_symbol: dict[str, int]) -> None:
+def _write_q6_json(
+    out_dir: Path,
+    month: str,
+    alpha_by_symbol: dict[str, float],
+    n_events_by_symbol: dict[str, int],
+    beta_by_symbol: dict[str, float] | None = None,
+) -> None:
     records = [
         {
             "symbol": sym,
@@ -106,7 +112,7 @@ def _write_q6_json(out_dir: Path, month: str, alpha_by_symbol: dict[str, float],
             "alpha_cv": alpha + 0.01,
             "raw_delta": 0.001,
             "raw_alpha_window1": alpha,
-            "median_beta": 2.0,
+            "median_beta": (beta_by_symbol or {}).get(sym, 2.0),
             "median_mu": 1.0,
             "count_variance_window_bt": 200.0,
         }
@@ -628,3 +634,147 @@ def test_run_q8_regimes_rendered_in_chronological_order(tmp_path: Path):
     i_2025 = md_text.index("2025-07")
     i_2026 = md_text.index("2026-07")
     assert i_baseline < i_2024 < i_2025 < i_2026
+
+
+def test_kernel_mode_shift_is_reported_alongside_alpha(tmp_path: Path) -> None:
+    """An alpha drop driven by fits locking onto a fast (beta > 10) mode must be flagged.
+
+    Baseline: all slow-mode fits. Regime: 3/4 fits in the fast mode, alpha
+    roughly halved, count-variance n-hat unchanged. Q8 must surface the
+    fast-mode share and the count-variance median so the alpha drop is not
+    read as an endogeneity drop.
+    """
+    syms = ["AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT"]
+    n_ev = {s: 10 ** (6 + i) for i, s in enumerate(syms)}
+    base_dir, reg_dir, out_dir = tmp_path / "base", tmp_path / "reg", tmp_path / "out"
+    for d in (base_dir, reg_dir, out_dir):
+        d.mkdir()
+    q4_records = [_q4_record(s, n_ev[s], 0.6, 0.5) for s in syms]
+    _write_q4_json(base_dir, "2023-06", q4_records)
+    _write_q4_json(reg_dir, "2024-07", q4_records)
+    _write_q6_json(base_dir, "2023-06", {s: 0.7 for s in syms}, n_ev, {s: 1.0 for s in syms})
+    _write_q6_json(
+        reg_dir,
+        "2024-07",
+        {s: 0.35 for s in syms},
+        n_ev,
+        {"AAAUSDT": 50.0, "BBBUSDT": 80.0, "CCCUSDT": 40.0, "DDDUSDT": 1.0},
+    )
+
+    result = run_q8(out_dir, baseline_dir=base_dir, regime_dirs={"2024-07": reg_dir})
+
+    base = result["baseline_summary"]
+    reg = result["regime_summaries"]["2024-07"]
+    assert base["fast_mode_fraction"] == 0.0
+    assert reg["fast_mode_fraction"] == 0.75
+    assert reg["alpha_cv_median"] == pytest.approx(0.36)
+    assert base["alpha_median_slow_mode"] == pytest.approx(0.7)
+    assert reg["alpha_median_slow_mode"] == pytest.approx(0.35)
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "fast-mode share" in report
+    assert "slow-mode fits" in report
+    assert "Kernel-mode shift" in report
+    assert "2024-07" in report.split("Kernel-mode shift")[1]
+
+
+def test_flat_flip_slope_is_not_reported_as_the_law_surviving(tmp_path: Path) -> None:
+    """A regime slope within two standard errors of zero must not count as sign agreement.
+
+    The baseline has a clear positive flip law. The native regime's p_flip is
+    noise around a constant, so its fitted slope may land on either side of
+    zero; whatever its sign, the report must call it indistinguishable from
+    zero rather than saying the law's direction survives.
+    """
+    rng = np.random.default_rng(7)
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    native = [
+        _q4_record(f"N{i}USDT", int(10 ** (6 + 3 * i / 40)), 0.3, 0.45 + rng.normal(0, 0.05))
+        for i in range(40)
+    ]
+    _write_q4_json(native_dir, "2026-07", native)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    stability = result["law_stability"]
+    assert stability["flip_law_distinguishable_by_label"]["__baseline__"] is True
+    assert stability["flip_law_distinguishable_by_label"]["2026-07"] is False
+    assert stability["flip_law_flat_regimes"] == ["2026-07"]
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "survives this survivorship-free test" not in report
+    assert "indistinguishable from zero" in report
+
+
+def test_low_r2_but_significant_gamma_slope_is_not_called_flat(tmp_path: Path) -> None:
+    """R^2 under the flatness bar with a slope > 2 se must be reported as weak dependence."""
+    rng = np.random.default_rng(11)
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    log_n = np.linspace(6.0, 7.5, 400)
+    native = [
+        _q4_record(f"N{i}USDT", int(10**x), 0.3 + 0.06 * x + rng.normal(0, 0.25), 0.45)
+        for i, x in enumerate(log_n)
+    ]
+    _write_q4_json(native_dir, "2026-07", native)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    g = result["regime_summaries"]["2026-07"]["gamma_law"]
+    assert g["r2"] < 0.05
+    assert abs(g["slope"] / g["stderr"]) >= 2.0
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "weak but nonzero activity dependence" in report
+    assert "γ remains flat" not in report
+
+
+def test_native_regime_splits_laws_by_cohort(tmp_path: Path) -> None:
+    """Laws on a native regime are refit separately on the baseline-overlap cohort and new listings.
+
+    Planted: on the 8 overlap symbols the native regime has an exact gamma
+    slope of 0.2 per decade (baseline gamma is flat); the 3 new listings have
+    flat gamma. The cohort split must recover the overlap slope, report the
+    baseline's own law on the same overlap symbols, and keep new listings apart.
+    """
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    records = [
+        _q4_record(sym, N_EVENTS[sym], gamma=0.1 + 0.2 * LOG_N[sym], p_flip=0.45)
+        for sym in NATIVE_OVERLAP_SYMBOLS
+    ]
+    records += [
+        _q4_record(sym, NATIVE_N_EVENTS[sym], gamma=GAMMA_BASE, p_flip=0.45)
+        for sym in NATIVE_NEW_SYMBOLS
+    ]
+    _write_q4_json(native_dir, "2026-07", records)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    cohorts = result["overlap"]["2026-07"]["cohort_laws"]
+    assert cohorts["regime_on_overlap"]["gamma_vs_activity"]["slope"] == pytest.approx(0.2)
+    assert cohorts["regime_on_overlap"]["gamma_vs_activity"]["n"] == 8
+    assert cohorts["baseline_on_overlap"]["p_flip_vs_activity"]["slope"] == pytest.approx(
+        FLIP_SLOPE_BASE
+    )
+    assert cohorts["regime_only"]["gamma_vs_activity"]["slope"] == pytest.approx(0.0, abs=1e-9)
+    assert cohorts["regime_only"]["gamma_vs_activity"]["n"] == 3
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "Cohort split" in report
+    assert "cannot and does not speak to new listings" not in report

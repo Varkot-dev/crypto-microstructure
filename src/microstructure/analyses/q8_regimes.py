@@ -66,6 +66,20 @@ REGRESSION_MISMATCH_TOL = 1e-6
 # own findings language for a weak/no relationship.
 GAMMA_FLAT_R2_THRESHOLD = 0.05
 
+# A flip-law slope counts toward a sign verdict only when it is at least this
+# many standard errors from zero. A slope inside that band has no reliable
+# sign, so "same sign as the baseline" would carry no information.
+FLIP_SLOPE_MIN_SE = 2.0
+
+# Kernel-mode split for Q6's single-exponential Hawkes fits. A fitted decay
+# rate above this (1/beta < 0.1 business-time seconds) means the MLE locked
+# onto the fast component of a multi-timescale kernel, which captures only
+# part of the excitation and so understates alpha. A regime whose fast-mode
+# share moves this far from the baseline's has an alpha median that is not
+# comparable to the baseline's as a measure of endogeneity.
+FAST_MODE_BETA = 10.0
+FAST_MODE_SHIFT_FLAG = 0.2
+
 
 def _chrono_key(label: str) -> tuple:
     """Sort key for a regime label: (YYYY, MM) parsed from a leading YYYY-MM
@@ -483,6 +497,13 @@ def _overlap_comparison(baseline_q4: dict, regime_q4: dict) -> dict:
         "regime_only_symbols": regime_only,
         "p_flip_spearman": p_flip_spearman,
         "gamma_spearman": gamma_spearman,
+        "cohort_laws": {
+            "baseline_on_overlap": _recompute_q4_regressions(base_records),
+            "regime_on_overlap": _recompute_q4_regressions(regime_records),
+            "regime_only": _recompute_q4_regressions(
+                [r for r in regime_q4["symbols"] if r["symbol"] in set(regime_only)]
+            ),
+        },
     }
 
 
@@ -565,13 +586,106 @@ def _regime_summary(q4: dict, q6: dict | None, *, universe: str = "fixed") -> di
             if alpha_vals.size
             else None
         )
+        cv_vals = np.array([r["alpha_cv"] for r in q6_records]) if q6_records else np.array([])
+        beta_vals = np.array([r["median_beta"] for r in q6_records]) if q6_records else np.array([])
+        summary["alpha_cv_median"] = float(np.median(cv_vals)) if cv_vals.size else None
+        summary["fast_mode_fraction"] = (
+            float(np.mean(beta_vals > FAST_MODE_BETA)) if beta_vals.size else None
+        )
+        slow_alpha = alpha_vals[beta_vals <= FAST_MODE_BETA] if beta_vals.size else np.array([])
+        summary["alpha_median_slow_mode"] = float(np.median(slow_alpha)) if slow_alpha.size else None
     else:
         summary["alpha_law"] = None
         summary["alpha_law_mismatch_warning"] = None
         summary["alpha_median"] = None
         summary["alpha_iqr"] = None
+        summary["alpha_cv_median"] = None
+        summary["fast_mode_fraction"] = None
+        summary["alpha_median_slow_mode"] = None
 
     return summary
+
+
+def _kernel_mode_lines(
+    baseline_label: str,
+    baseline_summary: dict,
+    regime_summaries: dict[str, dict],
+    ordered_regime_labels: list[str],
+) -> list[str]:
+    """Flag regimes whose alpha median moved because the exp-kernel fits changed mode."""
+    base_fast = baseline_summary.get("fast_mode_fraction")
+    if base_fast is None:
+        return []
+    shifted = [
+        label
+        for label in ordered_regime_labels
+        if regime_summaries[label].get("fast_mode_fraction") is not None
+        and abs(regime_summaries[label]["fast_mode_fraction"] - base_fast) > FAST_MODE_SHIFT_FLAG
+    ]
+    if not shifted:
+        return []
+    details = ", ".join(
+        f"{label} ({regime_summaries[label]['fast_mode_fraction']:.2f})" for label in shifted
+    )
+    return [
+        (
+            "**Kernel-mode shift — do not read the α median as an endogeneity change for: "
+        f"{details}.** The fast-mode share is the fraction of symbols whose single-exponential "
+        f"fit has β̂ > {FAST_MODE_BETA:g} (decay faster than {1 / FAST_MODE_BETA:g} business-time "
+        f"seconds); in the baseline ({baseline_label}) it is {base_fast:.2f}. A fit in the fast mode "
+        "captures only the fast component of a multi-timescale kernel, so its α̂ is lower by "
+        "construction. Compare these regimes on the slow-mode α median (fits with β̂ ≤ "
+        f"{FAST_MODE_BETA:g} only) or on the count-variance n̂_CV column, which assumes no "
+        "kernel shape."
+        ),
+        "",
+    ]
+
+
+def _fmt_law(reg: dict | None) -> str:
+    if reg is None:
+        return "n/a | n/a"
+    t = reg["slope"] / reg["stderr"] if reg["stderr"] > 0 else float("inf")
+    return f"{reg['slope']:+.4f} (t {t:+.2f}) | {reg['r2']:.3f}"
+
+
+def _cohort_split_lines(
+    baseline_label: str, overlap_by_label: dict[str, dict], ordered_regime_labels: list[str]
+) -> list[str]:
+    """Refit both laws per cohort so a within-symbol change is not confused with composition."""
+    lines = [
+        "### Cohort split (native-universe regimes)",
+        "",
+        (
+            "Both laws refit on three cohorts: the baseline's own data restricted to the symbols "
+            "present in both periods, this regime's data on those same symbols, and this "
+            "regime's newly listed symbols alone. A law that changes between the first two rows "
+            "changed within the same contracts; a law that differs only in the third row is a "
+            "composition effect. t = slope / OLS stderr."
+        ),
+        "",
+        "| regime | cohort | n | flip slope (t) | flip R² | γ slope (t) | γ R² |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    cohort_names = (
+        ("baseline_on_overlap", f"{baseline_label} data, shared symbols"),
+        ("regime_on_overlap", "this regime, shared symbols"),
+        ("regime_only", "this regime, new listings"),
+    )
+    for label in ordered_regime_labels:
+        if label not in overlap_by_label:
+            continue
+        cohorts = overlap_by_label[label]["cohort_laws"]
+        for key, name in cohort_names:
+            laws = cohorts[key]
+            reg = laws["p_flip_vs_activity"] or laws["gamma_vs_activity"]
+            n = reg["n"] if reg else 0
+            lines.append(
+                f"| {label} | {name} | {n} | {_fmt_law(laws['p_flip_vs_activity'])} | "
+                f"{_fmt_law(laws['gamma_vs_activity'])} |"
+            )
+    lines.append("")
+    return lines
 
 
 def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) -> dict:
@@ -602,8 +716,19 @@ def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) ->
 
     universe_by_label = {label: s["universe"] for label, s in all_summaries.items()}
 
+    distinguishable = {
+        label: bool(abs(s["flip_law"]["slope"]) >= FLIP_SLOPE_MIN_SE * s["flip_law"]["stderr"])
+        for label, s in all_summaries.items()
+        if s["flip_law"] is not None
+    }
+    flat_regimes = [
+        label for label, ok in distinguishable.items() if label != "__baseline__" and not ok
+    ]
+
     return {
         "flip_law_same_sign_all_regimes": same_sign,
+        "flip_law_distinguishable_by_label": distinguishable,
+        "flip_law_flat_regimes": flat_regimes,
         "flip_law_slope_by_label": {k: v for k, v in flip_slopes.items()},
         "flip_law_slope_ratio_vs_baseline": {k: v for k, v in slope_ratios.items() if k != "__baseline__"},
         "gamma_invariant_all_regimes": gamma_invariant,
@@ -794,9 +919,10 @@ def _write_md(
     lines.append("")
     lines.append(
         "| regime | universe | n_success | flip slope | flip R² | γ slope | γ R² | γ median (IQR) | "
-        "p_flip median | anti-persistent | α median (IQR) |"
+        "p_flip median | anti-persistent | α median (IQR) | α median, slow-mode fits | n̂_CV median | "
+        "fast-mode share |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
     def _row(label: str, s: dict) -> str:
         flip = s["flip_law"]
@@ -812,15 +938,24 @@ def _write_md(
         alpha_med = (
             f"{s['alpha_median']:.4f} ({s['alpha_iqr']:.4f})" if s["alpha_median"] is not None else "n/a"
         )
+        cv_med = f"{s['alpha_cv_median']:.4f}" if s.get("alpha_cv_median") is not None else "n/a"
+        fast = f"{s['fast_mode_fraction']:.2f}" if s.get("fast_mode_fraction") is not None else "n/a"
+        slow = (
+            f"{s['alpha_median_slow_mode']:.4f}"
+            if s.get("alpha_median_slow_mode") is not None
+            else "n/a"
+        )
         return (
             f"| {label} | {s['universe']} | {s['n_success']} | {flip_slope} | {flip_r2} | {gamma_slope} | "
-            f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} |"
+            f"{gamma_r2} | {gamma_med} | {p_flip_med} | {s['n_anti_persistent']} | {alpha_med} | "
+            f"{slow} | {cv_med} | {fast} |"
         )
 
     lines.append(_row(baseline_label, baseline_summary))
     for label in ordered_regime_labels:
         lines.append(_row(label, regime_summaries[label]))
     lines.append("")
+    lines.extend(_kernel_mode_lines(baseline_label, baseline_summary, regime_summaries, ordered_regime_labels))
 
     warnings = []
     ordered_labels_with_baseline = ["__baseline__", *ordered_regime_labels]
@@ -856,6 +991,15 @@ def _write_md(
             "regime as in the baseline — the direction of the p_flip-vs-activity relationship "
             "is stable across regimes."
         )
+        flat = law_stability.get("flip_law_flat_regimes") or []
+        if flat:
+            lines.append("")
+            lines.append(
+                f"Sign agreement is weaker than it looks: in {', '.join(flat)} the slope is "
+                f"within {FLIP_SLOPE_MIN_SE:g} standard errors of zero, i.e. indistinguishable "
+                "from zero, so its sign carries no information. The law is absent there, not "
+                "confirmed."
+            )
     else:
         flipped = [
             label
@@ -928,6 +1072,13 @@ def _write_md(
                 f"- Flip-law slope for {display}: not evaluable against the baseline (one or "
                 "both slopes not estimable)."
             )
+        elif not law_stability["flip_law_distinguishable_by_label"].get(label, True):
+            lines.append(
+                f"- Flip-law slope for {display} ({flip_slope:.4f}) is within "
+                f"{FLIP_SLOPE_MIN_SE:g} standard errors of zero — indistinguishable from zero. "
+                "The flip law is **absent** in this survivorship-free test, so its direction is "
+                "neither confirmed nor reversed."
+            )
         elif np.sign(flip_slope) == np.sign(baseline_flip_slope):
             lines.append(
                 f"- Flip-law slope for {display} ({flip_slope:.4f}) has the **same sign** as "
@@ -943,11 +1094,22 @@ def _write_md(
         if gamma_r2 is None:
             lines.append(f"- γ-vs-activity R² for {display}: not evaluable.")
         elif gamma_r2 < GAMMA_FLAT_R2_THRESHOLD:
-            lines.append(
-                f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
-                f"{GAMMA_FLAT_R2_THRESHOLD:g} — γ remains flat (liquidity-invariant) in this "
-                "survivorship-free test."
-            )
+            g_law = regime_summaries[label]["gamma_law"]
+            g_t = g_law["slope"] / g_law["stderr"] if g_law["stderr"] > 0 else float("inf")
+            if abs(g_t) >= FLIP_SLOPE_MIN_SE:
+                lines.append(
+                    f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
+                    f"{GAMMA_FLAT_R2_THRESHOLD:g}, but the slope ({g_law['slope']:.4f}, "
+                    f"{g_t:.1f} standard errors) is distinguishable from zero — a weak but "
+                    "nonzero activity dependence, not strict flatness."
+                )
+            else:
+                lines.append(
+                    f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
+                    f"{GAMMA_FLAT_R2_THRESHOLD:g} and the slope is within "
+                    f"{FLIP_SLOPE_MIN_SE:g} standard errors of zero — γ remains flat "
+                    "(liquidity-invariant) in this survivorship-free test."
+                )
         else:
             lines.append(
                 f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is at or above "
@@ -1046,6 +1208,7 @@ def _write_md(
                 f"{_fmt_corr(ov['p_flip_spearman'])} | {_fmt_corr(ov['gamma_spearman'])} |"
             )
         lines.append("")
+        lines.extend(_cohort_split_lines(baseline_label, overlap_by_label, ordered_regime_labels))
 
     if universe_accounting_by_label:
         lines.append("### Universe accounting (own requested universe, per regime)")
@@ -1105,14 +1268,25 @@ def _write_md(
         "delisted or otherwise absent, and this is reported as such via the skip/failure "
         "reason above rather than conflated with true delistings."
     )
-    lines.append(
-        "- **The regime universe is fixed to the baseline symbol list**: any symbol newly "
-        "listed in a later regime but absent from the baseline period is deliberately "
-        "excluded from every regime's requested universe upstream (Q4/Q6 are run against "
-        "`results/universe_2023-06.txt`), to keep the panel fixed and comparable across "
-        "regimes — this survivorship analysis therefore cannot and does not speak to new "
-        "listings, only to the fate of the original panel."
-    )
+    if overlap_by_label:
+        lines.append(
+            "- **Fixed and native universes answer different questions**: fixed-universe "
+            "regimes re-run the baseline's own symbol list (`results/universe_2023-06.txt`), "
+            "so they track the fate of the original panel and exclude later listings. "
+            f"Native-universe regimes ({', '.join(sorted(overlap_by_label))}) include later "
+            "listings, which differ in composition (new contract types as well as new coins); "
+            "the cohort split above separates the two. The native universe still applies the "
+            "same min_events floor and only contains symbols that exist in that period."
+        )
+    else:
+        lines.append(
+            "- **The regime universe is fixed to the baseline symbol list**: any symbol newly "
+            "listed in a later regime but absent from the baseline period is deliberately "
+            "excluded from every regime's requested universe upstream (Q4/Q6 are run against "
+            "`results/universe_2023-06.txt`), to keep the panel fixed and comparable across "
+            "regimes — this survivorship analysis therefore cannot and does not speak to new "
+            "listings, only to the fate of the original panel."
+        )
     lines.append(
         "- **Regression stderr/R² inherit Q4/Q6's own heteroskedasticity caveat**: as "
         "documented in `q4_cross_section.md` and `q6_endogeneity.md`, per-symbol estimator "

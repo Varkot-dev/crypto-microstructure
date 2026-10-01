@@ -675,3 +675,37 @@ def test_kernel_mode_shift_is_reported_alongside_alpha(tmp_path: Path) -> None:
     assert "slow-mode fits" in report
     assert "Kernel-mode shift" in report
     assert "2024-07" in report.split("Kernel-mode shift")[1]
+
+
+def test_flat_flip_slope_is_not_reported_as_the_law_surviving(tmp_path: Path) -> None:
+    """A regime slope within two standard errors of zero must not count as sign agreement.
+
+    The baseline has a clear positive flip law. The native regime's p_flip is
+    noise around a constant, so its fitted slope may land on either side of
+    zero; whatever its sign, the report must call it indistinguishable from
+    zero rather than saying the law's direction survives.
+    """
+    rng = np.random.default_rng(7)
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    native = [
+        _q4_record(f"N{i}USDT", int(10 ** (6 + 3 * i / 40)), 0.3, 0.45 + rng.normal(0, 0.05))
+        for i in range(40)
+    ]
+    _write_q4_json(native_dir, "2026-07", native)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    stability = result["law_stability"]
+    assert stability["flip_law_distinguishable_by_label"]["__baseline__"] is True
+    assert stability["flip_law_distinguishable_by_label"]["2026-07"] is False
+    assert stability["flip_law_flat_regimes"] == ["2026-07"]
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "survives this survivorship-free test" not in report
+    assert "indistinguishable from zero" in report

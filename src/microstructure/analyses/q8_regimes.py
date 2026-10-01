@@ -66,6 +66,11 @@ REGRESSION_MISMATCH_TOL = 1e-6
 # own findings language for a weak/no relationship.
 GAMMA_FLAT_R2_THRESHOLD = 0.05
 
+# A flip-law slope counts toward a sign verdict only when it is at least this
+# many standard errors from zero. A slope inside that band has no reliable
+# sign, so "same sign as the baseline" would carry no information.
+FLIP_SLOPE_MIN_SE = 2.0
+
 # Kernel-mode split for Q6's single-exponential Hawkes fits. A fitted decay
 # rate above this (1/beta < 0.1 business-time seconds) means the MLE locked
 # onto the fast component of a multi-timescale kernel, which captures only
@@ -658,8 +663,19 @@ def _law_stability(baseline_summary: dict, regime_summaries: dict[str, dict]) ->
 
     universe_by_label = {label: s["universe"] for label, s in all_summaries.items()}
 
+    distinguishable = {
+        label: bool(abs(s["flip_law"]["slope"]) >= FLIP_SLOPE_MIN_SE * s["flip_law"]["stderr"])
+        for label, s in all_summaries.items()
+        if s["flip_law"] is not None
+    }
+    flat_regimes = [
+        label for label, ok in distinguishable.items() if label != "__baseline__" and not ok
+    ]
+
     return {
         "flip_law_same_sign_all_regimes": same_sign,
+        "flip_law_distinguishable_by_label": distinguishable,
+        "flip_law_flat_regimes": flat_regimes,
         "flip_law_slope_by_label": {k: v for k, v in flip_slopes.items()},
         "flip_law_slope_ratio_vs_baseline": {k: v for k, v in slope_ratios.items() if k != "__baseline__"},
         "gamma_invariant_all_regimes": gamma_invariant,
@@ -922,6 +938,15 @@ def _write_md(
             "regime as in the baseline — the direction of the p_flip-vs-activity relationship "
             "is stable across regimes."
         )
+        flat = law_stability.get("flip_law_flat_regimes") or []
+        if flat:
+            lines.append("")
+            lines.append(
+                f"Sign agreement is weaker than it looks: in {', '.join(flat)} the slope is "
+                f"within {FLIP_SLOPE_MIN_SE:g} standard errors of zero, i.e. indistinguishable "
+                "from zero, so its sign carries no information. The law is absent there, not "
+                "confirmed."
+            )
     else:
         flipped = [
             label
@@ -993,6 +1018,13 @@ def _write_md(
             lines.append(
                 f"- Flip-law slope for {display}: not evaluable against the baseline (one or "
                 "both slopes not estimable)."
+            )
+        elif not law_stability["flip_law_distinguishable_by_label"].get(label, True):
+            lines.append(
+                f"- Flip-law slope for {display} ({flip_slope:.4f}) is within "
+                f"{FLIP_SLOPE_MIN_SE:g} standard errors of zero — indistinguishable from zero. "
+                "The flip law is **absent** in this survivorship-free test, so its direction is "
+                "neither confirmed nor reversed."
             )
         elif np.sign(flip_slope) == np.sign(baseline_flip_slope):
             lines.append(

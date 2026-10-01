@@ -3,8 +3,8 @@
 Empirical measurement of order-flow memory, price impact, and Hawkes self-excitation on Binance
 USDT-M perpetual futures tick data — classical microstructure results replicated on crypto and
 benchmarked against the published equities literature, then carried to a 121-symbol
-cross-section, a 41-symbol endogeneity panel, an execution-cost replay, and a two-regime
-robustness check three years apart.
+cross-section, a 41-symbol endogeneity panel, an execution-cost replay, and a six-regime
+robustness check running from 2023-06 to 2026-07.
 
 [![CI](https://github.com/Varkot-dev/crypto-microstructure/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Varkot-dev/crypto-microstructure/actions/workflows/ci.yml)
 [![Live results](https://img.shields.io/badge/live%20results-varkot--dev.github.io-blue)](https://varkot-dev.github.io/crypto-microstructure/)
@@ -15,23 +15,34 @@ cross-section and kernel explorers, plus how the numbers were verified.
 
 ## In 60 seconds
 
-- **Order flow has long memory that keeps its sign but loses its strength over time.** The
-  sign-flip-probability law (`p_flip` vs. log-activity) measures **slope +0.1114, R² = 0.2632**
-  in the 2023-06 baseline (121 symbols), a genuine out-of-sample pass one month later
-  (2023-07: slope +0.0920, R² = 0.2328), and decays to **slope +0.0230, R² = 0.0113** three years
-  on in 2026-07 — a slope smaller than its own standard error.
+- **Order flow has long memory, but the activity-dependence of its sign flips fades over three
+  years.** The sign-flip-probability law (`p_flip` vs. log-activity) measures **slope +0.1114,
+  R² = 0.2632** in the 2023-06 baseline (121 symbols) and passes out of sample one month later
+  (2023-07: slope +0.0920, R² = 0.2328). It weakens to about +0.045 in 2024-07 and 2025-07 (each
+  roughly 2.3-2.4 standard errors from zero) and is absent in 2026-07: slope +0.0230 (stderr
+  0.0325) on the fixed 2023 universe, and **slope +0.0006 (stderr 0.0126), R² = 0.000, n = 231**
+  on the 2026 market's own universe. The native-universe run is free of survivorship, so the
+  disappearance is a change in the market and not an artifact of which 2023 symbols survived
+  (that universe does differ in composition; see the report).
   → [`results/q4_cross_section.md`](results/q4_cross_section.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
-- **The order-flow-memory exponent γ̂ is liquidity-invariant, at least in 2023.** Regressed
-  against log-activity across the same 121-symbol cross-section: **slope −0.0112, R² = 0.0003** —
-  essentially flat. That invariance breaks in 2026-07 (R² jumps to 0.2441, with a sign flip),
-  the only reversal in the whole regime comparison.
+- **The order-flow-memory exponent γ̂ is liquidity-invariant in 2023; the later break is
+  confined to the fixed 2023 panel.** Regressed against log-activity across the 121-symbol
+  cross-section: **slope −0.0112, R² = 0.0003** — essentially flat, and still flat in 2023-07
+  and 2024-07 (R² 0.0086, 0.0013). On the same fixed universe R² then jumps to 0.2505 in 2025-07
+  and 0.2441 in 2026-07, but on the 2026 market's own 231-symbol universe it is small again
+  (R² = 0.0196). The break is therefore at least partly a selection effect of which 2023 symbols
+  survive; it is not shown to be entirely one.
   → [`results/q4_cross_section.md`](results/q4_cross_section.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
-- **~70% of trades are reactions to other trades.** The Hawkes branching ratio across a
-  41-symbol panel has **median α̂ = 0.7070** (range 0.3699–0.8790) under an exponential kernel —
-  a documented lower bound — and drifts down to a median of 0.5766 by 2026-07 while staying
-  liquidity-invariant in all three regimes (R² ≤ 0.0056).
+- **~70% of trades are reactions to other trades in 2023, drifting down moderately after.** The
+  Hawkes branching ratio across a 41-symbol panel has **median α̂ = 0.7070** (range
+  0.3699–0.8790) under an exponential kernel — a documented lower bound. Raw medians in later
+  months are not comparable at face value: the share of fits that lock onto the fast component of
+  a multi-timescale kernel (and so understate α̂ by construction) rises from 0.12 to 0.31–0.49.
+  On kernel-mode-robust measures (slow-mode α̂, kernel-free count-variance n̂, and symbols paired
+  across months) the drift is downward by roughly 0.02–0.17 in α̂ and 0.01–0.06 in n̂, and not
+  monotonic. α̂ shows no activity dependence beyond 2 standard errors in any regime.
   → [`results/q6_endogeneity.md`](results/q6_endogeneity.md),
   [`results/q8_regimes.md`](results/q8_regimes.md)
 - **Front-loading execution trades a deterministic cost for a stochastic one.** Against replayed
@@ -53,12 +64,12 @@ cross-section and kernel explorers, plus how the numbers were verified.
 | Q1b | The short-lag zigzag in Q1's ACF is real structure, not a tie-break artifact | [md](results/q1b_zigzag.md) |
 | Q2 | Response function rises 5.39×, matching flow-memory theory's predicted band | [md](results/q2_results.md) · [png](results/q2_response.png) |
 | Q3 | Price change is linear in OFI (R² = 0.40), below equities' 65–70% | [md](results/q3_results.md) · [png](results/q3_ofi_scatter.png) |
-| Q4 | γ̂ is liquidity-invariant (R² = 0.0003); p_flip is not (R² = 0.2632) | [md](results/q4_cross_section.md) · [png](results/q4_gamma_vs_activity.png) |
+| Q4 | In 2023-06, γ̂ is liquidity-invariant (R² = 0.0003); p_flip is not (R² = 0.2632) | [md](results/q4_cross_section.md) · [png](results/q4_gamma_vs_activity.png) |
 | Q4b | Activity dominates the p_flip law; tick size is a real but minor contributor | [md](results/q4b_tick_confound.md) |
 | Q5 | Critical balance β = (1−γ)/2 holds for 12 of 16 kernel-panel symbols | [md](results/q5_kernel_panel.md) · [png](results/q5_kernel_panel.png) |
 | Q6 | Median branching ratio 0.707 — ~70% of trades are endogenous reactions | [md](results/q6_endogeneity.md) · [png](results/q6_endogeneity.png) |
 | Q7 | Front-loaded execution: 15× variance reduction vs. TWAP/reactive | [md](results/q7_execution.md) · [png](results/q7_execution.png) |
-| Q8 | Cross-sectional laws hold one month out, degrade over three years | [md](results/q8_regimes.md) · [png](results/q8_regimes.png) |
+| Q8 | Flip law fades to zero by 2026 on both fixed and native universes; γ̂ break confined to the survivor panel; endogeneity drifts down modestly | [md](results/q8_regimes.md) · [png](results/q8_regimes.png) |
 
 ```
 docs/        report.md (full write-up), research/, plans/, specs/ — see docs/README.md

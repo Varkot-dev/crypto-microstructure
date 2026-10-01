@@ -602,24 +602,36 @@ function initExecution(data) {
 }
 
 /* ============================================================
-   5 — Regimes: the same laws, read across three months
+   5 — Regimes: the same laws, read across time and universes
    ============================================================ */
+
+const dash = '—';
+/** A number to `d` places, or an em dash when the value is null. */
+const orDash = (x, d = 4) => (x === null || x === undefined ? dash : fmt(x, d));
+/** Slopes span 0.0006 to 0.11; keep four places only where it matters. */
+const slopeFmt = (x) => fmt(x, Math.abs(x) < 0.001 ? 4 : 3);
+const joinList = (items) =>
+  items.length < 3
+    ? items.join(' and ')
+    : `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`;
 
 /**
  * Build the regime table. No Plotly here — this is a table because the
- * comparison is six numbers across three rows, and the figure that does
- * need a plot is the committed q8_regimes.png sitting under it.
+ * comparison is a dozen numbers across a handful of rows, and the figure
+ * that does need a plot is the committed q8_regimes.png sitting under it.
  *
  * The fit column keeps the site's tolerance-band motif: R² is drawn as a
  * bar against the 0.05 flatness threshold the comparator actually verdicts
  * on, so "flat" and "not flat" read as geometry rather than as a decimal.
+ * Null Hawkes fields (the native-universe run has no Q6 fit) render as "—".
  */
 function initRegimes(data) {
   const wrap = document.getElementById('r-table');
   const flat = data.gamma_flat_r2_threshold;
+  const rows = data.rows;
   // Domain wide enough for the largest R² in the table plus headroom, so
   // the threshold marker never sits flush against the right edge.
-  const domain = Math.max(flat * 2, ...data.rows.map((r) => r.gamma_r2), 0.3);
+  const domain = Math.max(flat * 2, ...rows.map((r) => r.gamma_r2), 0.3);
   const pct = (v) => Math.min(100, (v / domain) * 100);
 
   const fitCell = (r2, isBreak) => `
@@ -634,35 +646,50 @@ function initRegimes(data) {
       <span>${fmt(r2, 4)}</span>
     </span>`;
 
-  const body = data.rows
+  const body = rows
     .map((r) => {
       const gammaBreak = r.gamma_r2 >= flat;
+      const flipFlat = r.flip_distinguishable === false;
       const universe = r.requested
         ? `${r.n_success} / ${r.n_below_floor} / ${r.n_no_data}`
-        : '—';
+        : dash;
       const ratio =
-        r.flip_slope_ratio === null ? '—' : `${fmt(r.flip_slope_ratio, 2)}×`;
+        r.flip_slope_ratio === null ? dash : `${fmt(r.flip_slope_ratio, 2)}×`;
+      const alphaN = r.alpha_n === null ? '' : `<small> n=${r.alpha_n}</small>`;
       return `
       <tr data-baseline="${r.is_baseline}">
         <th scope="row">${r.label}${r.is_baseline ? '<small>baseline</small>' : ''}</th>
+        <td>${r.universe ?? dash}</td>
         <td>${r.n_success}</td>
-        <td>${sign(r.flip_slope)}</td>
+        <td data-break="${flipFlat}">${sign(r.flip_slope)}<small> se ${fmt(r.flip_stderr, 4)}${
+          flipFlat ? ' · ≈ 0' : ''
+        }</small></td>
         <td>${ratio}</td>
         <td>${fmt(r.flip_r2, 4)}</td>
         <td data-break="${gammaBreak}">${sign(r.gamma_slope)}</td>
         <td>${fitCell(r.gamma_r2, gammaBreak)}</td>
-        <td>${fmt(r.alpha_median, 4)}<small> n=${r.alpha_n}</small></td>
+        <td>${orDash(r.alpha_median)}${alphaN}</td>
+        <td>${orDash(r.alpha_median_slow_mode)}</td>
+        <td>${orDash(r.alpha_cv_median)}</td>
+        <td>${orDash(r.fast_mode_fraction, 2)}</td>
         <td>${universe}</td>
       </tr>`;
     })
     .join('');
 
+  const fixedReq = rows.find((r) => r.universe === 'fixed' && r.requested)?.requested;
+  const nativeReq = rows.find((r) => r.universe === 'native')?.requested;
+  const universeNote = nativeReq
+    ? `fixed ${fixedReq}-symbol 2023 universe, plus the 2026 market's own ${nativeReq}`
+    : `fixed ${fixedReq}-symbol 2023 universe`;
+
   wrap.innerHTML = `
     <table class="regime-table">
-      <caption>Q8 · the cross-section re-measured in three regimes · same fixed 207-symbol universe</caption>
+      <caption>Q8 · the cross-section re-measured in ${rows.length} regimes · ${universeNote}</caption>
       <thead>
         <tr>
           <th scope="col">Regime</th>
+          <th scope="col">Universe</th>
           <th scope="col">n</th>
           <th scope="col">p_flip slope</th>
           <th scope="col">vs. base</th>
@@ -670,49 +697,163 @@ function initRegimes(data) {
           <th scope="col">γ slope</th>
           <th scope="col">γ R² vs. ${flat} flat bar</th>
           <th scope="col">α median</th>
+          <th scope="col">α median, slow-mode fits</th>
+          <th scope="col">n̂_CV median</th>
+          <th scope="col">fast-mode share</th>
           <th scope="col">pass / floor / no data</th>
         </tr>
       </thead>
       <tbody>${body}</tbody>
     </table>`;
 
-  const [base, , last] = data.rows;
-  const mid = data.rows[1];
+  setText('r-eyebrow', `Q8 · ${rows.length} regimes · ${rows[0].label} → ${rows[rows.length - 1].label}`);
+  setText('ledger-regimes', `${rows.length} · ${rows[0].label} → ${rows[rows.length - 1].label}`);
 
-  document.getElementById('r-figcaption').textContent =
+  document.getElementById('r-figcaption').textContent = regimeCaption(rows);
+  document.getElementById('r-callout').innerHTML = [
+    flipParagraph(data),
+    gammaParagraph(data),
+    endogeneityParagraph(data),
+  ]
+    .map((t) => `<p>${t}</p>`)
+    .join('');
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+/** Figure caption. The committed scatter pairs the baseline with the first regime. */
+function regimeCaption(rows) {
+  const [base, first, ...later] = rows;
+  const rho = (r) => `ρ = ${fmt(r.p_flip_spearman, 3)} on ${r.n_overlap} symbols`;
+  const laterText = later.map((r) => `${rho(r)} in ${r.label} (${r.universe})`);
+  return (
     `results/q8_regimes.png — the flip law fitted per regime, γ against activity per ` +
-    `regime, and every symbol's p_flip in ${base.label} against ${last.label} with a ` +
-    `y = x reference. Rank correlation on the overlap falls from ` +
-    `ρ = ${fmt(mid.p_flip_spearman, 3)} on ${mid.n_overlap} symbols one month out to ` +
-    `ρ = ${fmt(last.p_flip_spearman, 3)} on ${last.n_overlap} symbols three years out.`;
+    `regime, and every symbol's p_flip in ${base.label} against ${first.label} with a ` +
+    `y = x reference. Rank correlation of p_flip with the baseline, on the symbols both ` +
+    `periods share: ${rho(first)} in ${first.label}` +
+    (later.length ? `, falling to ${joinList(laterText)}.` : '.')
+  );
+}
 
-  document.getElementById('r-callout').textContent =
-    `The p_flip slope keeps its sign in all three regimes and loses its strength: ` +
-    `${sign(base.flip_slope)} → ${sign(mid.flip_slope)} → ${sign(last.flip_slope)}, ` +
-    `or ${fmt(mid.flip_slope_ratio, 2)}× then ${fmt(last.flip_slope_ratio, 2)}× the ` +
-    `baseline, with R² falling ${fmt(base.flip_r2, 4)} → ${fmt(mid.flip_r2, 4)} → ` +
-    `${fmt(last.flip_r2, 4)}. The adjacent month is a real out-of-sample pass; ` +
-    `${last.label} is not — that slope sits below its own stderr of ` +
-    `${fmt(last.flip_stderr, 4)}. γ's liquidity-invariance holds in both 2023 months ` +
-    `and breaks in ${last.label} (R² ${fmt(last.gamma_r2, 4)}, n = ${last.n_success}), ` +
-    `the only sign flip in the table. A drop-one-out check on that regression: the slope ` +
-    `stays positive removing any single symbol (range ${fmt(last.gamma_influence?.loo_slope_min, 4)}–` +
-    `${fmt(last.gamma_influence?.loo_slope_max, 4)}), so the break's direction survives; but R² ` +
-    `swings ${fmt(last.gamma_influence?.loo_r2_min, 4)} (dropping ${last.gamma_influence?.loo_r2_min_symbol})–` +
-    `${fmt(last.gamma_influence?.loo_r2_max, 4)} (dropping ${last.gamma_influence?.loo_r2_max_symbol}), ` +
-    `so its strength is outlier-sensitive — ${last.gamma_influence?.top_cooks_d_symbols?.join(', ')} ` +
-    `are the highest-influence points by Cook's distance. But the comparison is not clean: of ` +
-    `${last.requested} symbols requested, ${last.n_no_data} had no data to download at ` +
-    `all and ${last.n_below_floor} fell below the one-million-event floor, leaving ` +
-    `${last.n_success}. Survivors are the symbols that stayed liquid, which compresses ` +
-    `the very activity axis the flip law regresses on — so a collapsed R² here is ` +
-    `equally consistent with a broken law and with an intact law measured through a ` +
-    `thin, range-truncated panel. This data does not choose. The cleanest signal that ` +
-    `something in the market itself moved is endogeneity, because it is a level rather ` +
-    `than a slope and so is immune to that problem: median α̂ ` +
-    `${fmt(base.alpha_median, 4)} → ${fmt(mid.alpha_median, 4)} → ` +
-    `${fmt(last.alpha_median, 4)}, monotone, on the same panel construction with the ` +
-    `same estimator.`;
+function flipParagraph(data) {
+  const rows = data.rows;
+  const flatLabels = data.flip_flat_regimes;
+  const detectable = rows.filter((r) => r.flip_distinguishable);
+  const lastDetectable = detectable[detectable.length - 1];
+  const flatRows = rows.filter((r) => flatLabels.includes(r.label));
+  const chain = rows.map((r) => slopeFmt(r.flip_slope)).join(' → ');
+  const flatDetail = flatRows
+    .map(
+      (r) =>
+        `${r.label}${r.universe === 'fixed' ? ' on the fixed panel' : ''} ` +
+        `(slope ${slopeFmt(r.flip_slope)}, se ${fmt(r.flip_stderr, 4)})`,
+    )
+    .join(' and ');
+  const hasNative = flatRows.some((r) => r.universe === 'native');
+  return (
+    `<strong>The flip law fades.</strong> The slope of p_flip on log activity runs ` +
+    `${chain} across ${joinList(rows.map((r) => r.label))}. It is detectable — at least ` +
+    `two standard errors from zero — through ${lastDetectable.label} and absent in ` +
+    `${flatDetail}.` +
+    (hasNative
+      ? ` Because the native-universe run keeps the 2026 market's own symbols rather than ` +
+        `the 2023 survivors, the disappearance is not a survivorship artifact.`
+      : '') +
+    ` Do not read the sign agreement across regimes as persistence: a slope ` +
+    `indistinguishable from zero has no reliable sign, so “same sign everywhere” is ` +
+    `weaker than it sounds.`
+  );
+}
+
+function gammaParagraph(data) {
+  const flat = data.gamma_flat_r2_threshold;
+  const fixed = data.rows.filter((r) => r.universe === 'fixed');
+  const native = data.rows.filter((r) => r.universe === 'native');
+  const flatFixed = fixed.filter((r) => r.gamma_r2 < flat);
+  const breakFixed = fixed.filter((r) => r.gamma_r2 >= flat);
+  const r2List = (rs) => joinList(rs.map((r) => `${fmt(r.gamma_r2, 4)} in ${r.label}`));
+  const nativeBreak = native.some((r) => r.gamma_r2 >= flat);
+
+  let text =
+    `<strong>γ's liquidity-invariance breaks only on the 2023 panel.</strong> γ against ` +
+    `activity is flat (R² below ${flat}) in ${joinList(flatFixed.map((r) => r.label))}, ` +
+    `but R² is ${r2List(breakFixed)} on the fixed 2023 panel`;
+  if (native.length && !nativeBreak) {
+    text +=
+      `, while on the 2026 market's own universe it is ${r2List(native)} — back below ` +
+      `the bar, with a slope of ${joinList(native.map((r) => sign(r.gamma_slope)))} against ` +
+      `${joinList(breakFixed.map((r) => sign(r.gamma_slope)))} on the panel. A weak ` +
+      `dependence remains, but the strong break shows up only among the 2023 survivors, ` +
+      `so it is at least partly a selection effect rather than a market-wide change.`;
+  } else if (native.length) {
+    text += `, and it also clears the bar on the native universe (${r2List(native)}).`;
+  } else {
+    text += '.';
+  }
+
+  const influenced = breakFixed.filter((r) => r.gamma_influence);
+  if (influenced.length) {
+    text +=
+      ' Drop-one-out checks on the broken regressions: ' +
+      influenced
+        .map((r) => {
+          const g = r.gamma_influence;
+          const dir = g.slope_stays_positive_every_drop
+            ? 'the slope stays positive removing any single symbol'
+            : 'the slope changes sign for at least one removal';
+          return (
+            `${r.label} — ${dir} (${fmt(g.loo_slope_min, 4)} to ${fmt(g.loo_slope_max, 4)}), ` +
+            `while R² swings ${fmt(g.loo_r2_min, 4)} (dropping ${g.loo_r2_min_symbol}) to ` +
+            `${fmt(g.loo_r2_max, 4)} (dropping ${g.loo_r2_max_symbol}); ` +
+            `highest Cook's distance: ${g.top_cooks_d_symbols.join(', ')}`
+          );
+        })
+        .join('. ') +
+      '. The direction is robust to single points; the strength is outlier-sensitive.';
+  }
+
+  const lastFixed = fixed[fixed.length - 1];
+  const nat = native[0];
+  if (lastFixed?.requested) {
+    text +=
+      ` The fixed panel is also thin: of ${lastFixed.requested} symbols requested for ` +
+      `${lastFixed.label}, ${lastFixed.n_no_data} had no data and ${lastFixed.n_below_floor} ` +
+      `fell below the one-million-event floor, leaving ${lastFixed.n_success}.`;
+  }
+  if (nat?.requested) {
+    text +=
+      ` The native run starts from ${nat.requested} symbols, with ${nat.n_no_data} without ` +
+      `data and ${nat.n_below_floor} below the floor, leaving ${nat.n_success}.`;
+  }
+  return text;
+}
+
+function endogeneityParagraph(data) {
+  const hawkes = data.rows.filter((r) => r.alpha_median !== null);
+  const noHawkes = data.rows.filter((r) => r.alpha_median === null);
+  const col = (key, d) => hawkes.map((r) => fmt(r[key], d)).join(', ');
+  const labels = joinList(hawkes.map((r) => r.label));
+  const rawMin = Math.min(...hawkes.map((r) => r.alpha_median));
+  const base = hawkes[0];
+  return (
+    `<strong>Endogeneity drifts down moderately, not the way the raw median suggests.</strong> ` +
+    `The raw α̂ median (${col('alpha_median', 3)} across ${labels}) is contaminated by a ` +
+    `kernel-mode switch: the share of single-exponential Hawkes fits that locked onto a fast ` +
+    `decay (β̂ > 10, i.e. faster than 0.1 business-time seconds) is ` +
+    `${col('fast_mode_fraction', 2)}. A fast-mode fit captures only part of the excitation, ` +
+    `so its α̂ is lower by construction. The comparable numbers are the slow-mode α median ` +
+    `(${col('alpha_median_slow_mode', 3)}) and the count-variance n̂ (${col('alpha_cv_median', 3)}), ` +
+    `which assumes no kernel shape. Read that way, the drift is moderate and not strictly ` +
+    `monotonic — not the ${fmt(base.alpha_median, 2)} → ${fmt(rawMin, 2)} crash the raw median ` +
+    `implies.` +
+    (noHawkes.length
+      ? ` ${joinList(noHawkes.map((r) => r.label))} has no Hawkes run, so it has no ` +
+        `endogeneity numbers.`
+      : '')
+  );
 }
 
 /* ============================================================

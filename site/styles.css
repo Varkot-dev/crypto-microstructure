@@ -670,7 +670,7 @@ code, .num { font-family: var(--face-data); font-variant-numeric: tabular-nums; 
 }
 .regime-table {
   width: 100%;
-  min-width: 46rem;
+  min-width: 80rem;
   border-collapse: collapse;
   font-family: var(--face-data);
   font-size: var(--text-caption);

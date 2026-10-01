@@ -228,7 +228,7 @@ def build_execution() -> None:
 
 
 def build_regimes() -> None:
-    """Q8: the three-regime table, universe accounting, stability verdicts."""
+    """Q8: the regime table (fixed + native universes), accounting, stability verdicts."""
     src = read_result("q8_regimes.json")
 
     summaries = {src["baseline_label"]: src["baseline_summary"]}
@@ -238,13 +238,27 @@ def build_regimes() -> None:
     accounting = src["universe_accounting"]
     ranks = src["rank_correlations"]
 
+    def alpha_n(s: dict) -> int | None:
+        # Regimes with no Q6 Hawkes run (the native 2026 universe) carry a null
+        # alpha_law; emit null rather than a fabricated zero.
+        law = s.get("alpha_law")
+        return law["n"] if law else None
+
+    def alpha_r2(s: dict) -> float | None:
+        law = s.get("alpha_law")
+        return law["r2"] if law else None
+
+    distinguishable = stability["flip_law_distinguishable_by_label"]
+
     def row(label: str) -> dict:
         s = summaries[label]
+        stab_key = "__baseline__" if label == src["baseline_label"] else label
         acct = accounting.get(label)
         rank = ranks.get(label)
         return {
             "label": label,
             "is_baseline": label == src["baseline_label"],
+            "universe": s.get("universe"),
             "n_success": s["n_success"],
             "flip_slope": s["flip_law"]["slope"],
             "flip_stderr": s["flip_law"]["stderr"],
@@ -255,9 +269,13 @@ def build_regimes() -> None:
             "gamma_median": s["gamma_median"],
             "p_flip_median": s["p_flip_median"],
             "n_anti_persistent": s["n_anti_persistent"],
-            "alpha_median": s["alpha_median"],
-            "alpha_n": s["alpha_law"]["n"],
-            "alpha_r2": s["alpha_law"]["r2"],
+            "flip_distinguishable": distinguishable.get(stab_key),
+            "alpha_median": s.get("alpha_median"),
+            "alpha_n": alpha_n(s),
+            "alpha_r2": alpha_r2(s),
+            "alpha_cv_median": s.get("alpha_cv_median"),
+            "fast_mode_fraction": s.get("fast_mode_fraction"),
+            "alpha_median_slow_mode": s.get("alpha_median_slow_mode"),
             # None for the baseline: it is the frame of reference, not a regime
             # measured against one, so it has no accounting or overlap row.
             "requested": acct["n_requested"] if acct else None,
@@ -290,7 +308,10 @@ def build_regimes() -> None:
             ),
         }
 
-    labels = [src["baseline_label"], *src["regime_labels"]]
+    # regime_labels_ordered lists fixed-universe regimes chronologically followed
+    # by native-universe ones; fall back to regime_labels for older artifacts.
+    ordered = src.get("regime_labels_ordered") or src["regime_labels"]
+    labels = [src["baseline_label"], *ordered]
     write_slice(
         "regimes.json",
         {
@@ -299,6 +320,8 @@ def build_regimes() -> None:
             "rows": [row(label) for label in labels],
             "gamma_flat_r2_threshold": stability["gamma_flat_r2_threshold"],
             "flip_same_sign_all_regimes": stability["flip_law_same_sign_all_regimes"],
+            "flip_flat_regimes": stability["flip_law_flat_regimes"],
+            "native_regimes": src.get("native_regimes", []),
             "gamma_invariant_all_regimes": stability["gamma_invariant_all_regimes"],
         },
     )

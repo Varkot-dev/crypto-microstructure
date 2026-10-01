@@ -1041,11 +1041,22 @@ def _write_md(
         if gamma_r2 is None:
             lines.append(f"- γ-vs-activity R² for {display}: not evaluable.")
         elif gamma_r2 < GAMMA_FLAT_R2_THRESHOLD:
-            lines.append(
-                f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
-                f"{GAMMA_FLAT_R2_THRESHOLD:g} — γ remains flat (liquidity-invariant) in this "
-                "survivorship-free test."
-            )
+            g_law = regime_summaries[label]["gamma_law"]
+            g_t = g_law["slope"] / g_law["stderr"] if g_law["stderr"] > 0 else float("inf")
+            if abs(g_t) >= FLIP_SLOPE_MIN_SE:
+                lines.append(
+                    f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
+                    f"{GAMMA_FLAT_R2_THRESHOLD:g}, but the slope ({g_law['slope']:.4f}, "
+                    f"{g_t:.1f} standard errors) is distinguishable from zero — a weak but "
+                    "nonzero activity dependence, not strict flatness."
+                )
+            else:
+                lines.append(
+                    f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is below "
+                    f"{GAMMA_FLAT_R2_THRESHOLD:g} and the slope is within "
+                    f"{FLIP_SLOPE_MIN_SE:g} standard errors of zero — γ remains flat "
+                    "(liquidity-invariant) in this survivorship-free test."
+                )
         else:
             lines.append(
                 f"- γ-vs-activity R² for {display} ({gamma_r2:.4f}) is at or above "

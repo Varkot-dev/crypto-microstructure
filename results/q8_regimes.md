@@ -44,7 +44,7 @@ Flip-law slope ratio vs. baseline, per regime:
 **2026-07-native** was run on the market's own requested universe for that period rather than the baseline's fixed symbol list, so its flip-law and γ-vs-activity verdicts below are **not confounded by survivorship** — the overlap comparison (see the Overlap section) restricts to symbols present in both periods, and any agreement or disagreement with the baseline law reflects the law itself, not which symbols happened to still exist in the baseline's original panel.
 
 - Flip-law slope for 2026-07-native (0.0006) is within 2 standard errors of zero — indistinguishable from zero. The flip law is **absent** in this survivorship-free test, so its direction is neither confirmed nor reversed.
-- γ-vs-activity R² for 2026-07-native (0.0196) is below 0.05 — γ remains flat (liquidity-invariant) in this survivorship-free test.
+- γ-vs-activity R² for 2026-07-native (0.0196) is below 0.05, but the slope (0.0612, 2.1 standard errors) is distinguishable from zero — a weak but nonzero activity dependence, not strict flatness.
 
 ### γ-break outlier sensitivity (drop-one-out)
 

@@ -709,3 +709,31 @@ def test_flat_flip_slope_is_not_reported_as_the_law_surviving(tmp_path: Path) ->
     report = (out_dir / "q8_regimes.md").read_text()
     assert "survives this survivorship-free test" not in report
     assert "indistinguishable from zero" in report
+
+
+def test_low_r2_but_significant_gamma_slope_is_not_called_flat(tmp_path: Path) -> None:
+    """R^2 under the flatness bar with a slope > 2 se must be reported as weak dependence."""
+    rng = np.random.default_rng(11)
+    base_dir, native_dir, out_dir = tmp_path / "base", tmp_path / "native", tmp_path / "out"
+    out_dir.mkdir()
+    _write_q4_json(base_dir, "2023-06", _baseline_records())
+    log_n = np.linspace(6.0, 7.5, 400)
+    native = [
+        _q4_record(f"N{i}USDT", int(10**x), 0.3 + 0.06 * x + rng.normal(0, 0.25), 0.45)
+        for i, x in enumerate(log_n)
+    ]
+    _write_q4_json(native_dir, "2026-07", native)
+
+    result = run_q8(
+        out_dir,
+        baseline_dir=base_dir,
+        regime_dirs={"2026-07": native_dir},
+        native_regimes={"2026-07"},
+    )
+
+    g = result["regime_summaries"]["2026-07"]["gamma_law"]
+    assert g["r2"] < 0.05
+    assert abs(g["slope"] / g["stderr"]) >= 2.0
+    report = (out_dir / "q8_regimes.md").read_text()
+    assert "weak but nonzero activity dependence" in report
+    assert "γ remains flat" not in report
